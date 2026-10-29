@@ -1,0 +1,133 @@
+// Flight details, in the order a flight lives: status, route, timeline from approach to take-off, aircraft,
+// stand and turnaround, passengers, conditions. Pure functions of the World; used by the selection panel.
+import { PHASE_LABEL } from '../sim/world.js';
+import { AIRCRAFT_TYPES } from '../sim/aircraftTypes.js';
+import { cityName, distanceKm } from '../sim/airlines.js';
+import { registration } from '../sim/brands.js';
+import { esc } from '../logos.js';
+
+const hhmm = (t) => `${String(Math.floor((t % 86400) / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}`;
+const km = (m) => (m >= 10000 ? '10+ km' : m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m / 50) * 50} m`);
+const dur = (mins) => (mins >= 60 ? `${Math.floor(mins / 60)} h ${String(Math.round(mins % 60)).padStart(2, '0')} min` : `${Math.round(mins)} min`);
+
+const FINISHED = ['departed', 'diverted', 'cancelled'];
+
+// Typical block time for a leg: cruise speed plus climb, descent and taxi.
+const legMinutes = (kmDist, props) => Math.round((kmDist / (props ? 480 : 800)) * 60 + 25);
+
+function leg(flightNo, from, to, props, note = '') {
+  const d = distanceKm(from, to);
+  return `<div class="leg"><b>${esc(flightNo)}</b>
+    <span class="rt"><em>${esc(from)}</em><small>${esc(cityName(from))}</small></span><span class="rarrow">${d ? `✈ ${Math.round(d).toLocaleString('en-IN')} km` : '✈'}</span>
+    <span class="rt"><em>${esc(to)}</em><small>${esc(cityName(to))}</small></span>
+    ${d ? `<small class="legnote">about ${dur(legMinutes(d, props))} in the air and on the ground${note}</small>` : ''}</div>`;
+}
+
+// The ordered steps with planned, estimated and actual times.
+function steps(w, f) {
+  const task = (id) => f.tasks?.find((t) => t.id === id);
+  const tm = f.times ?? {};
+  const arrEst = f.slot ? f.slot : f.sta - 300 + (f.inboundDelay ?? 0);
+  const list = [
+    { key: 'final', label: 'On final approach', plan: null, actual: tm.final ?? null, est: arrEst - 150 },
+    { key: 'landed', label: 'Landed', plan: f.sta - 300, actual: tm.landed ?? null, est: arrEst },
+    { key: 'onBlock', label: 'On block at the stand', plan: f.sta, actual: f.onBlock ?? null, est: arrEst + 300 },
+    { key: 'deboard', label: 'Passengers off', plan: null, actual: task('deboard')?.doneAt ?? null, est: null },
+    { key: 'board', label: 'Boarding starts', plan: null, actual: tm.board ?? null, est: null },
+    { key: 'close', label: 'Doors closed', plan: null, actual: task('close')?.doneAt ?? null, est: null },
+    { key: 'offBlock', label: 'Pushed back (off block)', plan: f.std, actual: f.offBlock ?? null, est: Math.max(f.std, w.t) },
+    { key: 'airborne', label: 'Airborne', plan: f.std + 12 * 60, actual: tm.airborne ?? null, est: Math.max(f.std, w.t) + 12 * 60 },
+  ];
+  // A step is done if it has a time, or if a later step does (flights that were already on a stand at the start).
+  let last = -1;
+  list.forEach((s, i) => {
+    if (s.actual !== null) last = i;
+  });
+  if (FINISHED.includes(f.phase) && f.phase === 'departed') last = list.length - 1;
+  let nowIndex = -1;
+  list.forEach((s, i) => {
+    s.done = i <= last;
+    if (!s.done && nowIndex < 0 && !FINISHED.includes(f.phase)) nowIndex = i;
+  });
+  if (nowIndex >= 0) list[nowIndex].now = true;
+  return list;
+}
+
+function timeline(w, f) {
+  const rows = steps(w, f).map((s) => {
+    const when = s.actual ?? (s.done ? null : s.est);
+    const delta = s.plan !== null && when !== null ? Math.round((when - s.plan) / 60) : null;
+    const cls = s.done ? 'done' : s.now ? 'now' : 'next';
+    const dtxt = delta !== null && Math.abs(delta) >= 2 ? `<small class="${delta > 14 ? 'bad' : delta > 4 ? 'mid' : 'ok'}">${delta > 0 ? '+' : ''}${delta} min</small>` : '';
+    return `<li class="${cls}"><i></i><span class="lb">${esc(s.label)}</span><span class="tm">${s.plan !== null ? `<small>plan ${hhmm(s.plan)}</small>` : ''}<b>${when !== null ? `${s.actual === null ? '~' : ''}${hhmm(when)}` : s.done ? 'done' : '–'}</b>${dtxt}</span></li>`;
+  }).join('');
+  return `<ol class="tline">${rows}</ol>`;
+}
+
+function turnaround(w, f) {
+  if (!f.tasks) return '';
+  const rows = f.tasks.map((task) => {
+    const pct = task.state === 'done' ? 100 : task.state === 'work' ? Math.max(0, Math.min(100, Math.round((1 - (task.end - w.t) / task.dur) * 100))) : 0;
+    const icon = { done: '✔', work: '●', driving: '→', wait: '○' }[task.state];
+    const times = task.doneAt ? `${task.start ? hhmm(task.start) : ''}–${hhmm(task.doneAt)}` : task.start && task.state !== 'wait' ? `from ${hhmm(task.start)}` : '';
+    return `<li class="${task.state}"><span>${icon} ${esc(task.label)}${times ? ` <small>${times}</small>` : ''}</span><i style="--p:${pct}%"></i></li>`;
+  }).join('');
+  return `<ul class="tasks">${rows}</ul>`;
+}
+
+function passengers(w, f) {
+  const t = AIRCRAFT_TYPES[f.type];
+  const p = f.pax;
+  const lf = Math.round((f.paxOut / t.seats) * 100);
+  let bar = '';
+  if (p && p.out > 0) {
+    const pct = Math.max(0, Math.min(100, Math.round((p.done / Math.max(1, f.paxOut)) * 100)));
+    const T = w.term.list[p.term];
+    bar = `<p>Departing passengers through security at ${esc(T?.short ?? p.term)}: <b>${Math.round(p.done)}/${f.paxOut}</b></p><div class="pbar"><i style="--p:${pct}%"></i></div>`;
+    if (p.board !== null) bar += `<p>Boarded <b>${Math.round(p.board)}</b>${p.missed ? ` · <span class="warn">${p.missed} missed the flight</span>` : ''}</p>`;
+  }
+  return `<div class="kpis fd-grid"><span>Arriving <b>${f.paxIn}</b></span><span>Departing <b>${f.paxOut}</b></span><span>Seats <b>${t.seats}</b></span><span>Load factor <b>${lf} %</b></span></div>${bar}`;
+}
+
+function conditions(w, f) {
+  const x = w.weather.now;
+  const { head, cross } = w.windComponents();
+  const lines = [
+    `Runway in use <b>${esc(w.active)}</b> · headwind ${Math.round(head)} kt, crosswind ${Math.round(cross)} kt`,
+    `Weather <b>${esc(x.label)}</b>, ${Math.round(x.tempC)} °C, visibility ${km(w.visibility())}${w.rampClosed ? ' · <span class="warn">ramp closed (lightning)</span>' : ''}`,
+    `Light <b>${esc(w.lights.phase)}</b>${w.lights.night ? ' · apron lights ' + (w.lights.apron ? 'on' : 'off') : ''}`,
+  ];
+  if (f.delayCause && (f.depDelay ?? 0) > 0) lines.push(`Delay cause <b>${esc(f.delayCause)}</b>`);
+  else if (f.delayCause) lines.push(`Delay cause so far <b>${esc(f.delayCause)}</b>`);
+  return lines.map((l) => `<p>${l}</p>`).join('');
+}
+
+// Everything between the header and the action buttons of the flight card.
+export function flightDetails(w, f) {
+  const t = AIRCRAFT_TYPES[f.type];
+  const stand = f.standId !== null ? w.standById.get(f.standId) : null;
+  const term = w.term.list[w.term.termFor(f)];
+  const delayNow = FINISHED.includes(f.phase) ? 0 : Math.round(((f.phase === 'scheduled' || f.phase === 'holding' || f.phase === 'inbound') ? f.inboundDelay ?? 0 : Math.max(0, (f.offBlock ?? w.t) - f.std)) / 60);
+  const next = steps(w, f).find((s) => s.now);
+  const status = `<div class="fd-status"><span class="pill ${f.phase}">${esc(PHASE_LABEL[f.phase])}</span>${delayNow >= 5 ? `<span class="pill late">${delayNow} min late</span>` : ''}${f.priority ? '<span class="pill prio">Priority</span>' : ''}
+    ${next ? `<small>Next: ${esc(next.label.toLowerCase())}${next.est ? ` about ${hhmm(next.est)}` : ''}</small>` : ''}</div>
+    ${f.waiting ? `<p class="warn">⏳ ${esc(f.waiting)}</p>` : ''}`;
+
+  const route = `${leg(f.arrNo, f.from, 'MAA', t.props)}${leg(f.depNo, 'MAA', f.to, t.props)}<p class="muted fine">${f.intl ? 'International' : 'Domestic'} rotation · ${AIRCRAFT_TYPES[f.type].turnMin} min scheduled turnaround</p>`;
+  const aircraft = `<div class="kpis fd-grid"><span>Type <b>${esc(t.name)}</b></span><span>Registration <b title="Made up for the simulation">${esc(registration(f.airline, f.id))}</b></span>
+    <span>Engines <b>${t.engines}× ${esc(t.engineModel)}</b></span><span>Wake <b>${t.wake === 'H' ? 'Heavy' : 'Medium'}</b></span>
+    <span>Size <b>${t.length} × ${t.span} m</b></span><span>Max weight <b>${t.mtow} t</b></span></div>`;
+  const ground = `<div class="kpis fd-grid"><span>Stand <b>${stand ? esc(stand.ref) : '–'}</b></span><span>Boarding <b>${stand ? (stand.contact ? 'jet bridge' : 'bus, remote') : '–'}</b></span>
+    <span>Terminal <b>${esc(term?.name ?? '–')}</b></span><span>Stand size <b>${t.code === 'E' ? 'wide-body' : 'narrow-body'}</b></span></div>${turnaround(w, f)}`;
+
+  const sec = (title, body) => `<section class="fd-sec"><h4>${title}</h4>${body}</section>`;
+  return [
+    sec('Status', status),
+    sec('Route', route),
+    sec('Timeline', timeline(w, f)),
+    sec('Aircraft', aircraft),
+    sec('Stand and turnaround', ground),
+    sec('Passengers', passengers(w, f)),
+    sec('Conditions', conditions(w, f)),
+  ].join('');
+}

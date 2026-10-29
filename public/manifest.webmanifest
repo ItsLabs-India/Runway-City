@@ -1,0 +1,14 @@
+{
+  "name": "Runway City · MAA",
+  "short_name": "Runway City",
+  "description": "A top-down airport management game inspired by Chennai. Unofficial fan project.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#141b24",
+  "theme_color": "#141b24",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

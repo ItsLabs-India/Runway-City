@@ -1,0 +1,67 @@
+# Runway City · MAA
+
+A 2D top-down airport management game in the browser, inspired by Chennai's real airport. You run the airport with quick, high-level building and group hiring, on the real layout, with real schedules and live traffic.
+
+*Unofficial fan project, not affiliated with the Airports Authority of India or any airline.*
+
+## Status
+
+**Playable.** Chennai's real layout (OpenStreetMap plus official chart facts) as a detailed top-down map with a living airport on it:
+
+- **Aircraft** land, taxi on the painted lines, park on a stand that fits, turn round, push back and take off. Gears stay on the lines (checked automatically). Eleven real types (ATR 72, Q400, A320neo, A321neo, 737-800, 737 MAX 8, 787-8, 787-9, A350-900, A340-300, 777-300ER) drawn from their real dimensions: wing planform, engines, winglets, tailplane, doors, flaps and slats that extend for landing.
+- **Real airlines:** 21 airlines (IndiGo, Air India Group, SpiceJet, Akasa, Emirates, Qatar, Singapore, Lufthansa, British Airways and more) with their corporate group, alliance and business model. Aircraft are painted in each airline's colours, map tags and flight lists carry its badge, and an **Airlines** view groups them by owner, alliance, type or region with today's on-time results.
+- **Weather, day and night:** random Chennai weather by season (north-east monsoon rain and thunderstorms, hot-season storms, winter mist), a real sun for the date, and night operations. The map darkens with sunrise, dusk and night; floodlights, runway, approach and taxiway lights, terminal windows and aircraft lights come on by rules. Rain, fog, lightning and wind change how the airport works (spacing, taxi speed, ramp work, runway closures). Weather can be set to Calm in the menu or the Operations panel.
+- **Flight details:** click any flight for an ordered card: status, the inbound and outbound route with distances, a timeline from final approach to take-off (planned, estimated and actual times, delays in minutes), aircraft (type, engines, size, a made-up registration), stand and turnaround progress, passengers and security progress, and the weather and runway conditions.
+- **Passengers** queue at check-in, security, emigration, immigration and baggage reclaim. Long queues delay boarding and passengers miss flights.
+- **You run it:** quick-add and upgrade counters, lanes, desks and belts (or stage a whole expansion in plan mode), set staffing, shifts and hiring, reassign stands, switch the runway, buy ground equipment.
+- **Expand** with real projects: rapid-exit taxiways, CAT-III landing, fuel hydrant, Terminal 3 (new stands with jet bridges) and Terminal 5.
+- **Scenarios:** normal day, Deepavali rush, Bhogi smoke, cyclone, IT outage, sandbox, a multi-day career, plus a daily challenge. A report card ends each day and offers a policy.
+- **Real world, optional:** real wind sets the runway; "Live Watch" shows real aircraft near Chennai.
+- **Saves**, offline play, phone layout, keyboard shortcuts.
+
+## Run it
+
+```bash
+npm install
+npm run dev                       # http://localhost:5173 (also serves /api like Cloudflare does)
+npm run check -- festival 24      # headless 24 h test: overlaps, stuck aircraft, line following
+npm run check:terminals           # passenger system, save/load determinism, lever tests
+npm run test:ui                   # 62-check browser test in your Chrome (Playwright)
+npm run inspect                   # live gear-to-line inspection of every scenario
+npm run check:flights              # flight details render for every flight and phase; milestones in order
+npm run check:weather              # sun, climate, determinism, lighting logic and weather rules
+npm run check:brands               # airline brand table: colours, contrast, callsigns
+npm run logos                     # list official logo files you added in public/data/logos/
+npm run aircraft                  # screenshots of every aircraft type (also: npm run dev → /aircraft.html)
+npm run import:timetable -- schedule.csv   # real timetable → public/data/timetable.json
+```
+
+Deploy (free Cloudflare account): `npm run build && npx wrangler deploy`. This serves the game and the `/api` proxy together.
+
+Useful URLs: `?scenario=cyclone`, `?time=09:20`, `?speed=20`, `?warm=1800`, `?panel=term`, `?view=stands`.
+
+| Control | Action |
+|---|---|
+| Drag / arrow keys / one finger | Move around |
+| Wheel / pinch / + − | Zoom |
+| Space, 1–5 | Pause, speed |
+| F T P O L | Flights, Terminals, Projects, Operations, Alerts |
+| Click an aircraft / stand / runway / terminal | Details and actions |
+| ☰ | Menu: scenarios, continue, save, export, import |
+
+## Airline logos
+
+Brand colours, groups and alliances are built in (`src/sim/brands.js`, approximate; edit freely). **Official logos are trademarks and are not bundled**: every airline gets a monogram badge in its colours. To show real logos, copy files named by IATA code (`6E.svg`, `AI.png`, `EK.webp` ...) into `public/data/logos/` and run `npm run logos`. They then replace the badges in the panels and on the map tags. Check the licence of any logo you add before you publish the game.
+
+## Map data
+
+```bash
+npm run fetch:osm   # re-download the OSM extract (rarely; the public server is often busy)
+npm run build:map   # data/raw/*.json → public/data/maa-map.json
+```
+
+Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL.
+
+## Plan
+
+See `CLAUDE.md` for the stack, rules and roadmap.

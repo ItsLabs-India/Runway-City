@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Runway City · aircraft viewer</title>
+<style>
+  html, body { margin: 0; background: #6f7b6a; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+  // Developer page: draws the aircraft fleet from the same geometry the game uses.
+  //   ?type=A20N,B77W  which types (default: all)   &scale=4  pixels per metre
+  //   &phase=final     flight phase (flaps / spoilers)   &moving=1  lights and propellers on
+  import { drawAircraft } from './src/map/sprites.js';
+  import { AIRCRAFT_TYPES, GENERIC_TAILS } from './src/sim/aircraftTypes.js';
+  import { BRANDS } from './src/sim/brands.js';
+  import { DOMESTIC_AIRLINES, FOREIGN_AIRLINES } from './src/sim/airlines.js';
+  const q = new URLSearchParams(location.search);
+  // ?airlines=1 shows every airline's livery on the type it flies here.
+  const byAirline = q.get('airlines') === '1';
+  const typeOf = (code) => FOREIGN_AIRLINES.find((a) => a.code === code)?.type ?? Object.keys(DOMESTIC_AIRLINES.find((a) => a.code === code)?.fleet ?? { A20N: 1 })[0];
+  const airlines = byAirline ? Object.keys(BRANDS) : null;
+  const types = byAirline ? airlines.map(typeOf) : (q.get('type') ?? Object.keys(AIRCRAFT_TYPES).join(',')).split(',');
+  const scale = Number(q.get('scale') ?? 3);
+  const cols = Number(q.get('cols') ?? 2);
+  const phase = q.get('phase') ?? 'atStand';
+  const moving = q.get('moving') === '1';
+  const cell = Math.max(...types.map((t) => AIRCRAFT_TYPES[t].span)) * scale + 60;
+  const rows = Math.ceil(types.length / cols);
+  const c = document.getElementById('c');
+  c.width = cols * cell;
+  c.height = rows * cell;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#6f7b6a';
+  ctx.fillRect(0, 0, c.width, c.height);
+  // A stand-like concrete apron behind the aircraft for contrast.
+  ctx.fillStyle = '#9aa0a5';
+  ctx.fillRect(0, 0, c.width, c.height);
+  types.forEach((type, i) => {
+    const cx = (i % cols) * cell + cell / 2;
+    const cy = Math.floor(i / cols) * cell + cell / 2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+    drawAircraft(ctx, { x: 0, y: 0, heading: -Math.PI / 2 * Number(q.get('rot') ?? 0), type, tail: GENERIC_TAILS[i % GENERIC_TAILS.length], airline: byAirline ? airlines[i] : q.get('airline'), phase, speed: 40 },
+      scale, { alt: phase === 'final' ? 60 : 0, moving, time: 0.5 });
+    ctx.restore();
+    ctx.fillStyle = '#111';
+    ctx.font = '14px sans-serif';
+    ctx.fillText(byAirline ? `${airlines[i]} · ${BRANDS[airlines[i]].name} · ${type}` : `${type} · ${AIRCRAFT_TYPES[type].name}`, cx - cell / 2 + 10, cy - cell / 2 + 20);
+  });
+  window.__done = true;
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "name": "runway-city",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Top-down 2D airport management game inspired by Chennai (MAA). Unofficial fan project.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "fetch:osm": "node scripts/fetch-osm.mjs",
+    "build:map": "node scripts/build-map.mjs",
+    "check": "node scripts/sim-check.mjs",
+    "inspect": "vite build && node scripts/inspect.mjs",
+    "aircraft": "node scripts/aircraft-sheet.mjs",
+    "check:brands": "node scripts/brand-check.mjs",
+    "check:weather": "node scripts/weather-check.mjs",
+    "check:flights": "node scripts/flight-check.mjs",
+    "logos": "node scripts/index-logos.mjs",
+    "check:terminals": "node scripts/term-check.mjs",
+    "test:ui": "vite build && node scripts/ui-test.mjs",
+    "import:timetable": "node scripts/import-timetable.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.1",
+    "vite": "^8.3.5"
+  }
+}
