@@ -9,6 +9,9 @@ import { SCENARIOS, RANDOM_EVENTS } from './scenarios.js';
 import { runwayFrames, orientStands } from '../map/props.js';
 import { seeded, closestOnPolyline, pointInPolygon } from '../map/geometry.js';
 import { Weather } from './weather.js';
+import { Ledger, TARIFFS } from './finance.js';
+import { buildJetBridges, bridgeExtension, doorAt } from './jetbridges.js';
+import { crewSprites } from './groundcrew.js';
 import { sunAt, daylight, dayPhase } from './sky.js';
 import { Terminals, PERKS } from './terminal.js';
 import { PROJECTS, freshProjects } from './projects.js';
@@ -30,6 +33,9 @@ const MAX_HOLDING_S = 40 * 60;
 const SEP = { MM: 90, MH: 90, HM: 135, HH: 105 }; // seconds, leader + follower wake
 const DEP_SEP = { M: 60, H: 120 };
 
+export const DEFAULT_TRAFFIC_BOOST = 0.5; // "Traffic" option on a normal day: +50 % by default, up to +100 %
+export const TRAFFIC_LEVELS = [0, 0.5]; // +100 % (1) works in the schedule but can still freeze the runway at line-up: not offered yet
+
 export const GSE = {
   tug: { label: 'Baggage tugs + carts', price: 18e5, start: 8 },
   beltLoader: { label: 'Belt loaders', price: 35e5, start: 9 },
@@ -50,6 +56,8 @@ const LANDING_PER_T = { dom: 320, intl: 640 };
 const PARKING_PER_T_H = 12;
 
 const VISIBLE = new Set(['final', 'goAround', 'landing', 'taxiIn', 'atStand', 'pushback', 'turning', 'taxiOut', 'holdShort', 'lineUp', 'takeoff']);
+const DEPARTURE_QUEUE = new Set(['pushback', 'turning', 'taxiOut', 'holdShort', 'lineUp']);
+const MAX_DEPARTURE_QUEUE = 9; // aircraft between push-back and take-off before the gate holds the next one
 const GROUND = new Set(['taxiIn', 'taxiOut', 'pushback', 'turning', 'holdShort', 'lineUp']);
 
 export const PHASE_LABEL = {
@@ -63,8 +71,10 @@ const freshDayWx = () => ({ rain: 0, storm: 0, lowVis: 0, ramp: 0, minVis: 99999
 const hhmmText = (t) => `${String(Math.floor((t % 86400) / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}`;
 
 export class World {
-  constructor(map, { scenarioId = 'normal', startTime = Date.now(), timetable = null, weatherMode = 'random' } = {}) {
+  constructor(map, { scenarioId = 'normal', startTime = Date.now(), timetable = null, weatherMode = 'random', trafficBoost = DEFAULT_TRAFFIC_BOOST } = {}) {
     this.map = map;
+    // The Traffic option: extra flights on top of a normal day (0, 0.5 or 1). Other scenarios set their own level.
+    this.trafficBoost = scenarioId === 'normal' ? trafficBoost : 0;
     this.timetable = timetable;
     this.scenarioId = scenarioId;
     this.scenario = SCENARIOS[scenarioId] ?? SCENARIOS.normal;
@@ -103,6 +113,7 @@ export class World {
     }
     this.graph.buildCorridors();
     this.standById = new Map(this.stands.map((s) => [s.id, s]));
+    this.bridges = buildJetBridges(map, this.stands);
 
     this.windBase = { ...this.scenario.wind }; // the scenario's (or the real) wind; the weather adds breezes, turbulence and gusts
     this.wind = { ...this.windBase, gust: null };
@@ -118,6 +129,8 @@ export class World {
     this.windWarnUntil = -1;
     this.stormWarned = -1;
     this.dayWx = freshDayWx();
+    this.ledger = new Ledger();
+    this.tariff = 'standard';
     this.active = this.#bestRunway();
     this.#setupRunway();
     this.closures = [];
@@ -127,8 +140,10 @@ export class World {
     this.lastDeparture = { t: -1e9, wake: 'M' };
     this.mods = { lowVisUntil: -1, itUntil: -1, itFactor: 1, secUntil: -1 };
 
-    this.pool = Object.fromEntries(Object.entries(GSE).map(([k, v]) => [k, { total: v.start, busy: 0, broken: 0 }]));
-    this.crews = { total: CREW.start, busy: 0 };
+    // A busier day starts with an airport equipped for it: crews and vehicles scale with the Traffic option.
+    const fleet = 1 + this.trafficBoost;
+    this.pool = Object.fromEntries(Object.entries(GSE).map(([k, v]) => [k, { total: Math.round(v.start * fleet), busy: 0, broken: 0 }]));
+    this.crews = { total: Math.round(CREW.start * fleet), busy: 0 };
     this.money = this.scenario.money;
     this.vehicles = [];
     this.nextVehicleId = 1;
@@ -201,7 +216,7 @@ export class World {
     for (const d of [day, day + 1]) {
       if (this.days.has(d)) continue;
       this.days.add(d);
-      const rotations = buildSchedule({ daySeed: this.daySeed, traffic: this.scenario.traffic, day: d, timetable: this.timetable });
+      const rotations = buildSchedule({ daySeed: this.daySeed, traffic: this.scenario.traffic, day: d, timetable: this.timetable, boost: this.trafficBoost });
       for (const r of rotations) {
         if (r.std < this.t0 - 600) continue; // already gone before the game started
         this.flights.push(this.#makeFlight(r));
@@ -510,7 +525,7 @@ export class World {
       this.#releaseSlot(f);
       this.kpi.arrivals++;
       const fee = AIRCRAFT_TYPES[f.type].mtow * LANDING_PER_T[f.intl ? 'intl' : 'dom'];
-      this.#earn(fee);
+      this.#earn(fee * TARIFFS[this.tariff].mult, 'landing', { airline: f.airline });
       // Choose the first exit we can reach at turn-off speed, with a route to the stand.
       const stop = TOUCHDOWN_M + (f.vApp ** 2 - 12 ** 2) / (2 * 2.3) + 40;
       const link = this.graph.standNode.get(f.standId);
@@ -746,7 +761,7 @@ export class World {
               if (!this.#rerouteAround(f, opposing, j)) this.#rerouteAround(opposing, f);
             }
             // Last resort (counted): after four minutes of standoff, go.
-            if (standoff && f.giveWayFor > 240) {
+            if ((standoff || (f.giveWayFor > 240 && this.#inBlockCycle(f))) && f.giveWayFor > 240) {
               f.giveWayFor = 0;
               j.cleared = true;
               f.admitted = true;
@@ -776,7 +791,7 @@ export class World {
         f.waiting = `Holding for ${blocker.phase === 'taxiIn' ? blocker.arrNo : blocker.depNo}`;
         // Last-resort deadlock breaker: only for a cycle of aircraft each waiting on the next,
         // never for an ordinary queue behind a stopped or holding aircraft.
-        if (f.blockedFor > 240 && this.#inBlockCycle(f)) {
+        if (f.blockedFor > (this.runwayUser === f.id ? 60 : 240) && this.#inBlockCycle(f)) {
           f.ghostUntil = this.t + 30;
           f.blockedFor = 0;
           this.kpi.conflictsIgnored++;
@@ -1053,11 +1068,26 @@ export class World {
   }
 
   // Waiting chain (blocked by, or giving way to) that loops back: a deadlock.
+  // Does a chain of aircraft, each waiting for the next, come back round to f? Links: holding behind
+  // an aircraft, giving way to one at a junction, waiting at the hold-short line for the aircraft that
+  // is using the runway, and waiting in the departure queue for the aircraft at its front.
   #inBlockCycle(f) {
-    const waitsOn = (x) => x.blockedBy ?? x.waitFor ?? null;
+    const waitsOn = (x) => {
+      // A blocker that has left the ground (or never was) is a stale link; do not let it hide the real wait.
+      const b = x.blockedBy !== null && x.blockedBy !== undefined ? this.flights.find((y) => y.id === x.blockedBy) : null;
+      if (b && GROUND.has(b.phase)) return b.id;
+      if (x.waitFor !== null && x.waitFor !== undefined) return x.waitFor;
+      if ((x.phase === 'holdShort' || x.phase === 'taxiOut') && this.runwayUser !== null && this.runwayUser !== x.id && x.waiting === 'Runway occupied') return this.runwayUser;
+      // In the departure queue: waiting for the aircraft at the front of it.
+      if (x.phase === 'holdShort' && x.waiting?.startsWith('Departure queue')) {
+        const head = this.flights.filter((g) => g.phase === 'holdShort').sort((p, q) => (q.priority - p.priority) || (p.queuedAt - q.queuedAt))[0];
+        if (head && head.id !== x.id) return head.id;
+      }
+      return null;
+    };
     const seen = new Set([f.id]);
     let g = this.flights.find((x) => x.id === waitsOn(f));
-    for (let i = 0; g && i < 8; i++) {
+    for (let i = 0; g && i < 30; i++) {
       const next = waitsOn(g);
       if (next === null) return false;
       if (seen.has(next)) return true;
@@ -1080,7 +1110,7 @@ export class World {
     const type = AIRCRAFT_TYPES[f.type];
     const k = type.seats / 186;
     const wide = type.code === 'E';
-    const remote = !stand.contact;
+    const remote = !stand.contact || !this.bridges.some((b) => b.standId === stand.id); // no bridge reaches: stairs and buses
     const min = 60;
     return [
       { id: 'chocks', label: 'Chocks and cones', after: [], dur: 1 * min, spots: [], crew: true },
@@ -1295,6 +1325,47 @@ export class World {
     this.vehicles = this.vehicles.filter((v) => v.state !== 'gone');
   }
 
+  // Jet bridges: rotunda, where the cab is now, which way it faces and what it is doing.
+  jetBridgeSprites() {
+    if (this.bridgesDirty) {
+      this.bridges = buildJetBridges(this.map, this.stands);
+      this.bridgesDirty = false;
+    }
+    const out = [];
+    for (const b of this.bridges) {
+      const st = this.standById.get(b.standId);
+      if (!st || st.locked) continue;
+      const f = st.occupant !== null ? this.flights.find((x) => x.id === st.occupant && x.phase === 'atStand') : null;
+      const ext = bridgeExtension(f, b.index, this.t);
+      let cab = b.park;
+      let heading = b.parkHeading;
+      let door = null;
+      if (f && ext.e > 0) {
+        door = doorAt(st, f.type, b.index, { x: f.x, y: f.y, heading: f.heading });
+        const dock = [door.x + door.out[0] * 2.4, door.y + door.out[1] * 2.4];
+        const dockH = Math.atan2(-door.out[1], -door.out[0]);
+        const k = ext.e * ext.e * (3 - 2 * ext.e);
+        cab = [b.park[0] + (dock[0] - b.park[0]) * k, b.park[1] + (dock[1] - b.park[1]) * k];
+        let dh = dockH - b.parkHeading;
+        while (dh > Math.PI) dh -= Math.PI * 2;
+        while (dh < -Math.PI) dh += Math.PI * 2;
+        heading = b.parkHeading + dh * k;
+      }
+      out.push({ id: b.id, standId: b.standId, index: b.index, rotunda: b.rotunda, cab, heading, e: ext.e, state: ext.state, flightId: f?.id ?? null });
+    }
+    return out;
+  }
+
+  // People on the apron (ramp teams, marshallers, wing walkers, fuellers ...), for drawing.
+  staffSprites() {
+    return crewSprites(this);
+  }
+
+  // State of the jet bridges serving a flight, for the flight card.
+  bridgesFor(f) {
+    return this.jetBridgeSprites().filter((b) => b.standId === f.standId && (b.index === 0 || AIRCRAFT_TYPES[f.type].code === 'E'));
+  }
+
   // World-space pieces of every visible vehicle (tug + carts trains included), for drawing.
   vehicleSprites() {
     const out = [];
@@ -1309,7 +1380,23 @@ export class World {
         const baseH = f && v.state === 'working' && !v.attached ? f.heading + lead.h : v.wh;
         const rel = Math.atan2(oy, ox) - lead.h;
         const dist = Math.hypot(ox, oy);
-        out.push({ kind: piece.kind, x: v.wx + Math.cos(baseH + rel) * dist, y: v.wy + Math.sin(baseH + rel) * dist, heading: v.wh + (piece.h - lead.h), seed: v.id * 7 + out.length, vehicleId: v.id });
+        const task = f?.tasks?.find((x) => x.id === v.task);
+        const work = v.state === 'working' && task?.state === 'work';
+        const progress = !task ? 0 : task.state === 'done' ? 1 : work ? Math.max(0, Math.min(1, 1 - (task.end - this.t) / task.dur)) : 0;
+        const index = v.pieces.indexOf(piece);
+        const carts = v.pieces.length - 1;
+        let fill = 0.85;
+        if (piece.kind === 'cart' && (v.task === 'unload' || v.task === 'load')) {
+          // Unloading fills the carts one after another; loading empties them.
+          const k = Math.max(0, Math.min(1, progress * carts - (index - 1)));
+          fill = v.task === 'unload' ? k : 1 - k;
+        }
+        out.push({
+          kind: piece.kind, x: v.wx + Math.cos(baseH + rel) * dist, y: v.wy + Math.sin(baseH + rel) * dist, heading: v.wh + (piece.h - lead.h),
+          seed: v.id * 7 + out.length, vehicleId: v.id, task: v.task, work, progress, fill,
+          flow: work && v.task === 'unload' ? 'down' : work && v.task === 'load' ? 'up' : null,
+          wide: f ? AIRCRAFT_TYPES[f.type].code === 'E' : false, moving: v.state === 'driveIn' || v.state === 'driveOut',
+        });
       }
     }
     for (const f of this.flights) {
@@ -1334,6 +1421,14 @@ export class World {
     if (this.runwayClosed() || this.closures.some((c) => c.from < this.t + 600 && c.to > this.t)) {
       f.waiting = 'Runway closed: holding at the gate';
       f.delayCause ??= 'Runway closed';
+      return;
+    }
+    // Departure metering: when the taxiway queue to the runway is full, aircraft wait at the gate (engines
+    // off) instead of piling up on the taxiways, where they would block arrivals and each other.
+    const queued = this.flights.filter((x) => x !== f && DEPARTURE_QUEUE.has(x.phase)).length;
+    if (queued >= MAX_DEPARTURE_QUEUE && !f.pushTug) {
+      f.waiting = 'Taxiway queue full: holding at the gate';
+      f.delayCause ??= 'Departure queue (runway capacity)';
       return;
     }
     let tug = this.vehicles.find((v) => v.flightId === f.id && v.spot === 'pushback');
@@ -1407,7 +1502,7 @@ export class World {
     f.phase = 'pushback';
     this.#say(f, false, 'push-back approved, facing the taxiway');
     const hours = (this.t - (f.onBlock ?? this.t)) / 3600;
-    if (hours > 2) this.#earn(AIRCRAFT_TYPES[f.type].mtow * PARKING_PER_T_H * (hours - 2));
+    if (hours > 2) this.#earn(AIRCRAFT_TYPES[f.type].mtow * PARKING_PER_T_H * (hours - 2) * TARIFFS[this.tariff].mult, 'parking', { airline: f.airline });
   }
 
   // Push-back path: tail-first back along the lead-in, round the painted lead-in curve onto the
@@ -1616,7 +1711,7 @@ export class World {
     this.kpi.depDelaySum += delay;
     if (delay <= 15 * 60) this.kpi.onTime++;
     this.#satisfaction(delay <= 15 * 60 ? 0.12 : -Math.min(4, delay / 600));
-    this.#earn((f.pax?.board ?? f.paxOut) * UDF[f.intl ? 'intl' : 'dom']);
+    this.#earn((f.pax?.board ?? f.paxOut) * UDF[f.intl ? 'intl' : 'dom'] * TARIFFS[this.tariff].mult, 'udf', { airline: f.airline });
     f.depDelay = delay;
     this.#airStat(f.airline, { dep: 1, onTime: delay <= 15 * 60 ? 1 : 0, delay, pax: (f.pax?.board ?? f.paxOut) + f.paxIn });
     if (delay > 900 && f.delayCause) this.dayCauses[f.delayCause] = (this.dayCauses[f.delayCause] ?? 0) + 1;
@@ -1763,21 +1858,28 @@ export class World {
   // ---------------------------------------------------------------------------------------------
   // Money and reputation
 
-  #earn(amount) {
+  #earn(amount, cat = 'other', meta = null) {
     this.money += amount;
     this.kpi.revenue += amount;
+    this.ledger.add('in', cat, amount, this.t, meta);
   }
 
-  #spend(amount) {
+  #spend(amount, cat = 'other', meta = null) {
     this.money -= amount;
     this.kpi.costs += amount;
+    this.ledger.add('out', cat, amount, this.t, meta);
   }
 
   #costs(dt) {
     const vehicles = Object.values(this.pool).reduce((s, p) => s + p.total, 0);
-    const perDay = FIXED_OPEX_PER_DAY + this.term.dailyStaffCost() + this.crews.total * CREW.dayCost * this.term.wageMul() + vehicles * VEHICLE_DAY_COST;
-    this.#spend((perDay / 86400) * dt);
-    this.#spend((this.lightingCostPerHour() / 3600) * dt);
+    const k = dt / 86400;
+    this.#spend(FIXED_OPEX_PER_DAY * k, 'fixed');
+    this.#spend(this.term.dailyStaffCost() * k, 'staff');
+    this.#spend(this.crews.total * CREW.dayCost * this.term.wageMul() * k, 'crews');
+    this.#spend(vehicles * VEHICLE_DAY_COST * k, 'vehicles');
+    this.#spend((this.lightingCostPerHour() / 3600) * dt, 'power');
+    const sat = TARIFFS[this.tariff].satPerHour;
+    if (sat) this.#satisfaction((sat * dt) / 3600);
   }
 
   #satisfaction(delta) {
@@ -1810,7 +1912,7 @@ export class World {
     const f = this.flights.find((x) => x.id === flightId);
     if (!f || f.priority) return { ok: false, message: 'Already prioritised' };
     if (this.money < 5e4) return { ok: false, message: 'Not enough money' };
-    this.#spend(5e4);
+    this.#spend(5e4, 'priority', { label: `Priority handling for ${f.depNo}` });
     f.priority = true;
     return { ok: true, message: `${f.depNo} prioritised: extra hands on the turnaround, first in the departure queue (₹50,000)` };
   }
@@ -1913,7 +2015,7 @@ export class World {
     if (!g) return { ok: false, message: 'Unknown vehicle' };
     const cost = g.price * n;
     if (this.money < cost) return { ok: false, message: 'Not enough money' };
-    this.#spend(cost);
+    this.#spend(cost, 'equipment', { label: `Bought ${n} × ${g.label.toLowerCase()}` });
     this.pool[kind].total += n;
     return { ok: true, message: `Bought ${n} × ${g.label.toLowerCase()} (${formatINR(cost)})` };
   }
@@ -1924,7 +2026,7 @@ export class World {
     const k = Math.min(n, free);
     if (k <= 0) return { ok: false, message: 'None free to sell' };
     p.total -= k;
-    this.#earn(GSE[kind].price * k * 0.5);
+    this.#earn(GSE[kind].price * k * 0.5, 'sales', { label: `Sold ${k} × ${GSE[kind].label.toLowerCase()}` });
     return { ok: true, message: `Sold ${k} × ${GSE[kind].label.toLowerCase()} at half price` };
   }
 
@@ -1932,7 +2034,7 @@ export class World {
     const cost = CREW.hireCost * n;
     if (n > 0 && this.money < cost) return { ok: false, message: 'Not enough money' };
     if (n < 0 && this.crews.total + n < this.crews.busy) return { ok: false, message: 'Crews are busy' };
-    if (n > 0) this.#spend(cost);
+    if (n > 0) this.#spend(cost, 'hiring', { label: `Hired ${n} ramp crews` });
     this.crews.total += n;
     return { ok: true, message: n > 0 ? `Hired ${n} ramp crews (${formatINR(cost)})` : `Released ${-n} ramp crews` };
   }
@@ -1958,12 +2060,19 @@ export class World {
     this.radio.push(`${f.callsign.toLowerCase()} ${spell(num)}, ${spell(text)}`);
   }
 
-  income(amount) {
-    this.#earn(amount);
+  income(amount, cat = 'other', meta = null) {
+    this.#earn(amount, cat, meta);
   }
 
-  pay(amount) {
-    this.#spend(amount);
+  pay(amount, cat = 'other', meta = null) {
+    this.#spend(amount, cat, meta);
+  }
+
+  // Airport charges: discount / standard / premium.
+  setTariff(id) {
+    if (!TARIFFS[id]) return { ok: false, message: 'Unknown tariff' };
+    this.tariff = id;
+    return { ok: true, message: `Airport charges: ${TARIFFS[id].label} (${TARIFFS[id].text})` };
   }
 
   nudgeSatisfaction(delta) {
@@ -2126,7 +2235,7 @@ export class World {
     const missing = P.needs.find((n) => this.projects[n].state !== 'done');
     if (missing) return { ok: false, message: `Needs ${PROJECTS[missing].name} first` };
     if (this.money < P.cost) return { ok: false, message: 'Not enough money' };
-    this.#spend(P.cost);
+    this.#spend(P.cost, 'projects', { label: `Project started: ${P.name}` });
     Object.assign(st, { state: 'building', startedAt: this.t, finishAt: this.t + P.hours * 3600 });
     this.note('info', `${P.name} started: ready in ${P.hours} hours.`);
     return { ok: true, message: `${P.name} started (${P.hours} h)` };
@@ -2163,6 +2272,7 @@ export class World {
       const e = closestOnPolyline([s.x, s.y], site.polygon);
       s.bridge = [e.x, e.y];
     }
+    this.bridges = buildJetBridges(this.map, this.stands);
     this.note('info', `${mine.length} new stands with jet bridges open at Terminal 3.`);
   }
 
@@ -2238,6 +2348,8 @@ export class World {
       retail: d.retail,
       satisfaction: this.satisfaction(),
       causes: Object.entries(this.dayCauses).sort((x, y) => y[1] - x[1]).slice(0, 4),
+      finance: this.ledger.closeDay(),
+      tariff: this.tariff,
       weather: { ...this.dayWx, season: this.weather.month, mode: this.weatherMode },
       airlines: Object.entries(this.airDay).map(([code, a]) => ({ code, ...a })).sort((x, y) => y.dep - x.dep),
       offer: this.#offerPerks(),
@@ -2287,8 +2399,8 @@ export class World {
       mods: this.mods, pool: this.pool, crews: this.crews, money: this.money, vehicles: this.vehicles, nextVehicleId: this.nextVehicleId,
       log: this.log, kpi: this.kpi, events: this.events, flights: this.flights, days: [...this.days], stands,
       term: this.term.snapshot(), perks: this.perks, projects: this.projects, dayIndex: this.dayIndex, dayBase: this.dayBase,
-      dayCauses: this.dayCauses, airDay: this.airDay, dayWx: this.dayWx, weather: this.weather.snapshot(), windBase: this.windBase, weatherMode: this.weatherMode, lighting: this.lighting, rampClosedUntil: this.rampClosedUntil, pendingReport: this.pendingReport, reports: this.reports,
-      autoRunway: this.autoRunway, liveWeather: this.liveWeather, lastRunwayChange: this.lastRunwayChange,
+      dayCauses: this.dayCauses, airDay: this.airDay, dayWx: this.dayWx, ledger: this.ledger.snapshot(), tariff: this.tariff, weather: this.weather.snapshot(), windBase: this.windBase, weatherMode: this.weatherMode, lighting: this.lighting, rampClosedUntil: this.rampClosedUntil, pendingReport: this.pendingReport, reports: this.reports,
+      autoRunway: this.autoRunway, liveWeather: this.liveWeather, lastRunwayChange: this.lastRunwayChange, trafficBoost: this.trafficBoost,
     });
   }
 
@@ -2300,8 +2412,9 @@ export class World {
       runwayUser: s.runwayUser, lastDeparture: s.lastDeparture, mods: s.mods, pool: s.pool, crews: s.crews, money: s.money,
       vehicles: s.vehicles, nextVehicleId: s.nextVehicleId, log: s.log, kpi: s.kpi, events: s.events, flights: s.flights,
       days: new Set(s.days), perks: s.perks, projects: s.projects, dayIndex: s.dayIndex, dayBase: s.dayBase,
-      dayCauses: s.dayCauses, airDay: s.airDay ?? {}, dayWx: s.dayWx ?? freshDayWx(), windBase: s.windBase ?? s.wind, weatherMode: s.weatherMode ?? 'random', lighting: s.lighting ?? { apron: 'auto', runway: 'auto', dark: null, rwyFaultUntil: -1 }, rampClosedUntil: s.rampClosedUntil ?? -1, pendingReport: s.pendingReport, reports: s.reports, autoRunway: s.autoRunway,
+      dayCauses: s.dayCauses, airDay: s.airDay ?? {}, dayWx: s.dayWx ?? freshDayWx(), ledger: Ledger.restore(s.ledger), tariff: s.tariff ?? 'standard', windBase: s.windBase ?? s.wind, weatherMode: s.weatherMode ?? 'random', lighting: s.lighting ?? { apron: 'auto', runway: 'auto', dark: null, rwyFaultUntil: -1 }, rampClosedUntil: s.rampClosedUntil ?? -1, pendingReport: s.pendingReport, reports: s.reports, autoRunway: s.autoRunway,
       liveWeather: s.liveWeather, lastRunwayChange: s.lastRunwayChange,
+      trafficBoost: s.trafficBoost ?? 0, // saves from before the Traffic option keep their original level
     });
     if (s.weather) this.weather = Weather.restore(s.weather);
     this.weather.update(this.t, 0);
@@ -2321,6 +2434,7 @@ export class World {
       stand.kind = st.kind;
       if (st.bridge) stand.bridge = st.bridge;
       else delete stand.bridge;
+      this.bridgesDirty = true;
     }
     this.term.restore(s.term);
     return this;

@@ -7,7 +7,9 @@ import { PROJECTS } from '../sim/projects.js';
 import { brandOf } from '../sim/brands.js';
 import { badge } from '../logos.js';
 import { weatherPanel } from './weatherUi.js';
+import { financePanel } from './financeUi.js';
 import { flightDetails } from './flightDetails.js';
+import { ROLES } from '../sim/groundcrew.js';
 import { airlinesView, airlineLine, boardControls, groupedRows, nameOf } from './airlines.js';
 import { PROCESSES, PROC_ORDER, DIALS, DEPTS, SHIFTS, PERKS, TERMINAL_DEFS, fmtCr } from '../sim/terminal.js';
 
@@ -29,6 +31,7 @@ export function panel(tab, w, ui) {
   if (tab === 'term') return terminalsPanel(w, ui);
   if (tab === 'proj') return projectsPanel(w);
   if (tab === 'ops') return opsPanel(w, ui);
+  if (tab === 'fin') return financePanel(w);
   return logPanel(w);
 }
 
@@ -184,6 +187,18 @@ function projectsPanel(w) {
 
 // ---- operations --------------------------------------------------------------------------------
 
+// Who is out on the apron right now, by job.
+function staffNow(w) {
+  const count = {};
+  for (const p of w.staffSprites()) count[p.role] = (count[p.role] ?? 0) + 1;
+  const parts = Object.entries(count).sort((a, b) => b[1] - a[1]).map(([role, n]) => `<span class="chip2 on"><i class="vest" style="--v:${ROLES[role]?.vest ?? '#999'}"></i>${n} ${esc((ROLES[role]?.label ?? role).toLowerCase())}${n > 1 ? 's' : ''}</span>`);
+  const bridges = w.jetBridgeSprites();
+  const docked = bridges.filter((b) => b.state === 'docked').length;
+  const moving = bridges.filter((b) => b.state === 'docking' || b.state === 'retracting').length;
+  return `<p class="muted fine">On the apron now:</p><div class="chips2">${parts.join('') || '<span class="muted">nobody</span>'}</div>
+    <p class="muted fine">Jet bridges: ${docked} docked, ${moving} moving, ${bridges.length - docked - moving} parked of ${bridges.length}.</p>`;
+}
+
 function opsPanel(w, ui) {
   const k = w.kpi;
   const objectives = w.objectives();
@@ -215,13 +230,16 @@ function opsPanel(w, ui) {
     <h3>Real world</h3>
     <div class="row-actions">
       ${toggle('liveWeather', w.liveWeather, 'Real weather', live.weather ?? 'Open-Meteo, METAR when available')}
+      <small class="muted">Real weather and Live Watch follow the real clock: they match the game exactly at 1× speed.</small>
       ${toggle('autoRunway', w.autoRunway, 'Runway follows wind')}
       ${toggle('liveTraffic', live.trafficOn, 'Live Watch', live.traffic ?? 'real aircraft near Chennai (needs the proxy)')}
       ${toggle('voice', ui.voice, 'ATC voice')}
+      ${toggle('sound', ui.sound, 'Sound', 'wind, rain, aircraft and vehicles: zoom in to hear them')}
     </div>
     <h3>Ground crews</h3>
     <table class="fleet"><tr class="${w.crews.busy >= w.crews.total ? 'short' : ''}"><td>${esc(CREW.label)}</td><td>${w.crews.busy}/${w.crews.total}</td>
       <td class="buy"><button data-action="hire" data-arg="crew:5" title="${formatINR(CREW.hireCost * 5)} to hire, ${formatINR(CREW.dayCost)} per crew per day">+5</button><button data-action="hire" data-arg="crew:-1">−1</button></td></tr></table>
+    ${staffNow(w)}
     <h3>Ground equipment <small>(in use / owned)</small></h3>
     <table class="fleet">${fleet}</table>`;
 }
@@ -235,15 +253,15 @@ function logPanel(w) {
 
 // ---- selection panel ---------------------------------------------------------------------------
 
-export function selectionPanel(w, sel) {
-  if (sel.type === 'flight') return flightPanel(w, sel.id);
+export function selectionPanel(w, sel, ui = null) {
+  if (sel.type === 'flight') return flightPanel(w, sel.id, ui);
   if (sel.type === 'stand') return standPanel(w, sel.id);
   if (sel.type === 'runway') return runwayPanel(w);
   if (sel.type === 'info') return `<button class="x" data-close aria-label="Close">×</button><h2>${esc(sel.info.title)}</h2>${sel.info.lines.map((l) => `<p>${esc(l)}</p>`).join('')}`;
   return '';
 }
 
-function flightPanel(w, id) {
+function flightPanel(w, id, ui) {
   const f = w.flights.find((x) => x.id === id);
   if (!f) return '';
   const canChangeStand = ['scheduled', 'holding', 'inbound', 'final'].includes(f.phase);
@@ -253,7 +271,7 @@ function flightPanel(w, id) {
     <h2 class="fh">${badge(f.airline, 'lg')} ${esc(f.arrNo)} / ${esc(f.depNo)}</h2>
     <p class="sub"><b>${esc(nameOf(f))}</b> · ${esc(f.intl ? 'international' : 'domestic')}</p>
     <p class="muted">${airlineLine(f.airline)}</p>
-    ${flightDetails(w, f)}
+    ${flightDetails(w, f, ui)}
     <div class="row-actions">
       <button data-action="follow" data-arg="${f.id}">🎥 Follow</button>
       ${!f.priority && !['departed', 'diverted', 'cancelled'].includes(f.phase) ? `<button data-action="prioritise" data-arg="${f.id}" title="₹50,000: faster turnaround, first in the departure queue">⚡ Prioritise</button>` : ''}

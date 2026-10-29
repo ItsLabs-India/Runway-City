@@ -9,9 +9,10 @@ const REAL_DAILY_DEPARTURES = 206; // summer 2026 count from the research notes
 // Relative domestic arrivals by IST hour: quiet 00–05, banks in the morning and evening.
 const DOMESTIC_HOURLY = [1, 0.5, 0.3, 0.3, 0.6, 2.2, 4.2, 5, 5.2, 5, 4.6, 4.2, 3.8, 3.6, 3.8, 4.2, 4.6, 5, 5.2, 5.4, 5.2, 4.6, 3.4, 2];
 
-export function buildSchedule({ daySeed = 1, traffic = 0.7, rush = 1, day = 0, timetable = null } = {}) {
+// `boost` is the Traffic option: 0.5 = half as many flights again as the scenario's own level, 1 = double.
+export function buildSchedule({ daySeed = 1, traffic = 0.7, rush = 1, day = 0, timetable = null, boost = 0 } = {}) {
   const rnd = seeded(daySeed * 7919 + day * 104729);
-  if (timetable?.length) return fromTimetable({ daySeed, day, timetable, traffic, rush, rnd });
+  if (timetable?.length) return fromTimetable({ daySeed, day, timetable, traffic, rush, rnd, boost });
   const pick = (weights) => {
     const total = weights.reduce((a, w) => a + w, 0);
     let r = rnd() * total;
@@ -36,7 +37,7 @@ export function buildSchedule({ daySeed = 1, traffic = 0.7, rush = 1, day = 0, t
 
   // Foreign airlines: fixed banks, wide-bodies and narrow-bodies from the Gulf and Asia.
   for (const a of FOREIGN_AIRLINES) {
-    for (let k = 0; k < a.perDay; k++) {
+    for (let k = 0; k < Math.round(a.perDay * (1 + boost)); k++) {
       if (rnd() > Math.min(1, traffic * rush + 0.25)) continue;
       const t = AIRCRAFT_TYPES[a.type];
       const sta = base + Math.round((a.banks[k % a.banks.length] + (rnd() - 0.5) * 0.3) * 3600);
@@ -48,7 +49,7 @@ export function buildSchedule({ daySeed = 1, traffic = 0.7, rush = 1, day = 0, t
   }
 
   // Domestic carriers: hourly profile, fleet mix, some international legs for IndiGo / Air India Express.
-  const target = Math.round(REAL_DAILY_DEPARTURES * traffic * rush) - rotations.length;
+  const target = Math.round(REAL_DAILY_DEPARTURES * traffic * rush * (1 + boost)) - rotations.length;
   for (let i = 0; i < target; i++) {
     const a = DOMESTIC_AIRLINES[pick(DOMESTIC_AIRLINES.map((x) => x.weight))];
     const intl = a.intl.length > 0 && rnd() < a.intlShare;
@@ -75,7 +76,7 @@ export function buildSchedule({ daySeed = 1, traffic = 0.7, rush = 1, day = 0, t
 
 // A real timetable (public/data/timetable.json, made with scripts/import-timetable.mjs): every row
 // is one rotation with its own flight numbers, valid on the weekdays listed in `days` (1 = Monday).
-function fromTimetable({ daySeed, day, timetable, traffic, rush, rnd }) {
+function fromTimetable({ daySeed, day, timetable, traffic, rush, rnd, boost }) {
   const date = new Date(Date.UTC(Math.floor(daySeed / 10000), (Math.floor(daySeed / 100) % 100) - 1, daySeed % 100) + day * 86400e3);
   const weekday = String(date.getUTCDay() || 7);
   const known = [...DOMESTIC_AIRLINES, ...FOREIGN_AIRLINES];
@@ -91,6 +92,15 @@ function fromTimetable({ daySeed, day, timetable, traffic, rush, rnd }) {
     const rot = makeRotation(++id, airline, r.type, r.intl, r.from, 0, sta, std, rnd);
     Object.assign(rot, { arrNo: r.arrNo, depNo: r.depNo, to: r.to ?? r.from });
     out.push(rot);
+    // Extra sections for the Traffic option: copies a little earlier or later, with their own flight numbers.
+    for (let c = 1; c <= Math.ceil(boost); c++) {
+      if (rnd() >= Math.min(1, boost - (c - 1))) continue;
+      const shift = Math.round((rnd() - 0.5) * 80) * 60;
+      const extra = makeRotation(++id, airline, r.type, r.intl, r.from, 0, sta + shift, std + shift, rnd);
+      const bump = (no) => no.replace(/\d+$/, (n) => String(Number(n) + 2000 * c));
+      Object.assign(extra, { arrNo: bump(r.arrNo), depNo: bump(r.depNo), to: r.to ?? r.from });
+      out.push(extra);
+    }
   }
   return out.sort((p, q) => p.sta - q.sta);
 }

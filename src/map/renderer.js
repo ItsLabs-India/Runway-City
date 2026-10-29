@@ -5,6 +5,7 @@ import {
   trees, parkedCars, floodlights, emergencyVehicles, edgeLights,
 } from './props.js';
 import { drawAircraft, drawVehicle, drawCar } from './sprites.js';
+import { drawPerson, drawJetBridge } from './apronSprites.js';
 import { bbox, overlaps, polygonArea, centroid, polylineLength, alongPolyline } from './geometry.js';
 import { AIRCRAFT_TYPES } from '../sim/aircraftTypes.js';
 import { brandOf, onColour } from '../sim/brands.js';
@@ -134,7 +135,7 @@ export class MapRenderer {
     if (s > 0.5) {
       for (const v of vehicles) {
         if ((v.kind === 'cone' && s < 1.2) || !inView(v, view, 15)) continue;
-        drawVehicle(ctx, v, s);
+        drawVehicle(ctx, v, s, sim.t);
       }
     }
     const ground = flights.filter((f) => f.alt <= 0.5);
@@ -143,7 +144,10 @@ export class MapRenderer {
       if (!inView(f, view, 80)) continue;
       drawAircraft(ctx, f, s, { selected: f === selectedFlight, moving: f.phase !== 'atStand', time, shadow });
     }
-    this.#drawJetBridges(ctx, sim);
+    if (s > 0.6) {
+      for (const p of sim.staffSprites()) if (inView(p, view, 10)) drawPerson(ctx, p, s, sim.t);
+    }
+    this.#drawJetBridges(ctx, sim, s, view);
     for (const f of air) drawAircraft(ctx, f, s, { alt: f.alt, selected: f === selectedFlight, moving: true, time, shadow });
 
     // Real aircraft from the live feed: translucent, with a dashed outline and their callsign.
@@ -194,38 +198,13 @@ export class MapRenderer {
     drawScaleBar(ctx, camera);
   }
 
-  #drawJetBridges(ctx, sim) {
-    const w = this.world;
-    // Bridges added by the Terminal 3 project.
-    ctx.lineCap = 'butt';
-    for (const st of sim.stands) {
-      if (!st.bridge) continue;
-      const nx = st.x - st.dir[0] * 2;
-      const ny = st.y - st.dir[1] * 2;
-      ctx.strokeStyle = C.jetBridgeEdge;
-      ctx.lineWidth = 4.6;
-      ctx.beginPath();
-      ctx.moveTo(st.bridge[0], st.bridge[1]);
-      ctx.lineTo(nx, ny);
-      ctx.stroke();
-      ctx.strokeStyle = C.jetBridge;
-      ctx.lineWidth = 3.4;
-      ctx.stroke();
-      ctx.fillStyle = C.jetBridgeEdge;
-      ctx.beginPath();
-      ctx.arc(st.bridge[0], st.bridge[1], 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillRect(nx - 2.2, ny - 2.2, 4.4, 4.4);
+  // Working jet bridges: they drive out to the door and back (World.jetBridgeSprites).
+  #drawJetBridges(ctx, sim, s, view) {
+    if (s < 0.25) return;
+    for (const b of sim.jetBridgeSprites()) {
+      if (!inView({ x: b.rotunda[0], y: b.rotunda[1] }, view, 70)) continue;
+      drawJetBridge(ctx, b, s, sim.t);
     }
-    ctx.lineCap = 'butt';
-    ctx.strokeStyle = C.jetBridgeEdge;
-    ctx.lineWidth = 4.6;
-    ctx.stroke(w.jetBridges);
-    ctx.strokeStyle = C.jetBridge;
-    ctx.lineWidth = 3.4;
-    ctx.stroke(w.jetBridges);
-    ctx.fillStyle = C.jetBridgeEdge;
-    ctx.fill(w.rotundas);
   }
 
   // Closed stands get a red cross; the selected flight's stand a yellow ring; in stand-picking

@@ -23,10 +23,10 @@ export function squawk(id) {
 
 export function telemetry(w, f) {
   const t = AIRCRAFT_TYPES[f.type];
-  const base = { callsign: `${f.callsign} ${flightNo(f).replace(/^\D+\s*/, '')}`, squawk: squawk(f.id), type: t, engines: t.engines };
+  const base = { callsign: `${f.callsign} ${flightNo(f).split(' ').pop()}`, squawk: squawk(f.id), type: t, engines: t.engines };
   if (!LIVE.has(f.phase)) {
     const notes = {
-      scheduled: `Not yet on the way. Due at ${f.sta}`,
+      scheduled: 'Not yet on the way',
       holding: 'Holding for a stand or a landing slot',
       inbound: 'In the arrival sequence, not yet in range',
       departed: 'Has left the area',
@@ -37,7 +37,7 @@ export function telemetry(w, f) {
   }
 
   const phase = f.phase;
-  const gs = f.speed / KT;
+  const gs = (phase === 'final' && f.speed < 1 ? f.vApp : f.speed) / KT; // the first moment on final: the speed is set a tick later
   const bearing = (((90 + (f.heading * 180) / Math.PI) % 360) + 360) % 360;
   const dir = ((w.wind.from - bearing) * Math.PI) / 180;
   const head = w.wind.kt * Math.cos(dir);
@@ -68,7 +68,7 @@ export function telemetry(w, f) {
     distLabel = 'rolled since touchdown';
   } else if (phase === 'takeoff') {
     dist = Math.max(0, f.s);
-    distLabel = 'rolled on the runway';
+    distLabel = f.alt > 1 ? 'since the start of the take-off roll' : 'rolled on the runway';
   } else if (['taxiIn', 'taxiOut', 'pushback'].includes(phase) && f.path) {
     dist = Math.max(0, f.limit - f.s);
     distLabel = phase === 'taxiIn' ? 'to the stand' : phase === 'taxiOut' ? 'to the hold-short line' : 'of push-back to go';

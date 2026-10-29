@@ -52,7 +52,7 @@ for (const [key, text] of [['f', 'Arrivals'], ['t', 'Upgrade planner'], ['p', 'T
 await page.keyboard.press('Escape');
 check('Esc closes the panel', await W(() => document.querySelector('[data-panel]').hidden));
 await page.keyboard.press('3');
-check('key 3 sets 5x speed', (await W(() => window.__runway.hud && document.querySelector('[data-speed="5"]').classList.contains('active'))) === true);
+check('key 3 sets 10x speed', (await W(() => window.__runway.hud && document.querySelector('[data-speed="10"]').classList.contains('active'))) === true);
 await page.keyboard.press('Space');
 check('Space pauses', await W(() => document.querySelector('[data-speed="0"]').classList.contains('active')));
 
@@ -137,15 +137,16 @@ const rowId = await W(() => window.__runway.world.flights.find((f) => f.phase ==
 await page.click(`[data-row="${rowId}"]`);
 await settle();
 check('board row selects the flight', (await W(() => document.querySelector('[data-info]').innerText)).toLowerCase().includes('passengers'));
-check('flight details come in order: status, route, timeline, aircraft, stand, passengers, conditions', await W(() => {
+check('flight details come in order: status, live data, route, timeline, aircraft, stand, passengers, conditions', await W(() => {
   const heads = [...document.querySelectorAll('[data-info] .fd-sec h4')].map((h) => h.innerText.toLowerCase());
-  return heads.join('|') === 'status|route|timeline|aircraft|stand and turnaround|passengers|conditions';
+  return heads.join('|') === 'status|live data|route|timeline|aircraft|stand and turnaround|passengers|conditions';
 }));
 check('the timeline lists the steps of the flight, done steps first', await W(() => {
   const items = [...document.querySelectorAll('[data-info] .tline li')].map((li) => li.className);
   const firstOpen = items.findIndex((c) => c !== 'done');
   return items.length >= 7 && items.slice(0, firstOpen).every((c) => c === 'done') && items.slice(firstOpen).every((c) => c !== 'done');
 }));
+check('live data shows four instruments, ground speed and the altimeter setting', await W(() => document.querySelectorAll('[data-info] .inst-row .inst').length === 4 && /ground speed/i.test(document.querySelector('[data-info]').innerText) && /QNH/.test(document.querySelector('[data-info]').innerText)));
 check('the flight card shows a registration and the route distance', await W(() => /[A-Z0-9]{1,3}-[A-Z]{2,4}/.test(document.querySelector('[data-info]').innerText) && /[0-9] km/.test(document.querySelector('[data-info]').innerText)));
 const mBefore = await W(() => window.__runway.world.money);
 await click('[data-action="prioritise"]');
@@ -206,6 +207,33 @@ await W(() => {
 });
 check('the ramp reopens after the storm', await W(() => window.__runway.world.rampClosed === false));
 
+// ---- finance, top-bar shortcuts, panel header, help --------------------------------------------------
+await page.click('.stats .stat.money');
+await settle();
+check('clicking the cash opens Finance', await W(() => window.__runway.hud.tab === 'fin'));
+check('Finance shows today, cash flow, income and expense breakdowns', await W(() => document.querySelectorAll('.fcards .fcard').length === 6 && Boolean(document.querySelector('.cashflow')) && document.querySelectorAll('.fbars li').length >= 4));
+check('panels have a title bar with a close button', await W(() => document.querySelector('[data-panel] .ph h2')?.innerText.toLowerCase().includes('finance') && Boolean(document.querySelector('[data-panel] .ph .x'))));
+await click('[data-action="tariff"][data-arg="premium"]');
+check('airport charges can be set', await W(() => window.__runway.world.tariff === 'premium'));
+await click('[data-action="tariff"][data-arg="standard"]');
+const [csv] = await Promise.all([page.waitForEvent('download'), click('[data-action="exportFinance"]')]);
+check('the books export as CSV', (await csv.suggestedFilename()).endsWith('.csv'));
+await page.keyboard.press('o');
+await settle();
+check('long panels get section links', await W(() => document.querySelectorAll('[data-panel] .jump button').length >= 4));
+await page.click('[data-panel] .jump button:last-child');
+await settle(600);
+check('a section link scrolls the panel', await W(() => document.querySelector('[data-panel]').scrollTop > 100));
+await page.click('[data-panel] .ph .x');
+await settle();
+check('the title bar closes the panel', await W(() => window.__runway.hud.tab === null));
+await page.keyboard.press('h');
+await settle();
+check('H opens keys and tips', await W(() => window.__runway.hud.modalKind === 'help' && document.querySelectorAll('.keys-table tr').length >= 10));
+await page.keyboard.press('Escape');
+await settle();
+check('Esc closes the help', await W(() => window.__runway.hud.modalKind === null));
+
 // ---- projects ------------------------------------------------------------------------------------
 await page.keyboard.press('p');
 await settle();
@@ -235,8 +263,18 @@ check('Terminal 3 adds new jet-bridge stands', t3.bridges > 0 && t3.contact === 
 
 // ---- day report card -------------------------------------------------------------------------------
 await page.waitForSelector('[data-modal]:not([hidden]) h1', { timeout: 8000 });
+if (process.env.DEBUG_GRIDLOCK) console.log(await W(() => {
+  const w = window.__runway.world;
+  const hh = (x) => `${String(Math.floor((x % 86400) / 3600)).padStart(2, '0')}:${String(Math.floor((x % 3600) / 60)).padStart(2, '0')}`;
+  const ru = w.flights.find((f) => f.id === w.runwayUser);
+  const lines = [`t ${hh(w.t)} runwayUser ${w.runwayUser} ${ru ? ru.depNo + ' ' + ru.phase + ' s ' + ru.s?.toFixed(0) + ' wait ' + ru.waiting : ''} closed ${w.runwayClosed()}`];
+  for (const f of w.flights.filter((x) => ['taxiOut', 'holdShort', 'taxiIn', 'lineUp', 'landing', 'pushback'].includes(x.phase))) lines.push(`${f.id} ${f.phase} ${f.depNo} v${f.speed.toFixed(1)} s${f.s.toFixed(0)}/${f.limit?.toFixed(0)} wait=${f.waiting} blockedBy=${f.blockedBy} waitFor=${f.waitFor} blockedFor=${f.blockedFor?.toFixed(0)} giveWay=${f.giveWayFor?.toFixed(0)} ghost=${f.ghostUntil > w.t}`);
+  lines.push('overrides ' + JSON.stringify((w.overrides ?? []).slice(-6)));
+  return lines.join(String.fromCharCode(10));
+}));
 check('day report appears at midnight', (await W(() => document.querySelector('[data-modal] h1').innerText)).toLowerCase().includes('report'));
-check('day report lists results by airline group', await W(() => document.querySelector('[data-modal]').innerText.includes('Airlines') && document.querySelectorAll('[data-modal] .rgroup .al').length >= 3));
+const reportAl = await W(() => ({ airlines: document.querySelector('[data-modal]').innerText.includes('Airlines'), rows: document.querySelectorAll('[data-modal] .rgroup .al').length, day: window.__runway.world.pendingReport?.airlines?.length, text: document.querySelector('[data-modal]').innerText.slice(0, 400) }));
+check('day report lists results by airline group', reportAl.airlines && reportAl.rows >= 3, JSON.stringify(reportAl));
 await page.screenshot({ path: `${out}/report.png` });
 await page.click('[data-modal] .card');
 await settle();

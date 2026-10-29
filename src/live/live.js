@@ -14,7 +14,7 @@ export const ghostType = (t) => TYPE_MAP.find(([re]) => re.test(t ?? ''))?.[1] ?
 
 export async function fetchWeather() {
   try {
-    const res = await fetch(`${BASE}/api/metar`);
+    const res = await fetch(`${BASE}/api/metar`, { signal: AbortSignal.timeout(7000) });
     if (res.ok) {
       const m = await res.json();
       if (m.wind && typeof m.wind.from === 'number') return { from: m.wind.from, kt: m.wind.kt, source: `VOMM METAR ${m.raw}` };
@@ -22,7 +22,7 @@ export async function fetchWeather() {
   } catch {
     /* no proxy: fall through to Open-Meteo */
   }
-  const res = await fetch(OPEN_METEO);
+  const res = await fetch(OPEN_METEO, { signal: AbortSignal.timeout(7000) });
   if (!res.ok) throw new Error(`Open-Meteo ${res.status}`);
   const c = (await res.json()).current;
   return { from: c.wind_direction_10m, kt: c.wind_speed_10m, source: 'Open-Meteo' };
@@ -48,7 +48,7 @@ export class LiveTraffic {
     this.status = 'connecting';
     const poll = async () => {
       try {
-        const res = await fetch(`${BASE}/api/traffic`);
+        const res = await fetch(`${BASE}/api/traffic`, { signal: AbortSignal.timeout(8000) });
         if (!res.ok) throw new Error(String(res.status));
         const data = await res.json();
         const now = performance.now();

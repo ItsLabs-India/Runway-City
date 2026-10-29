@@ -318,7 +318,7 @@ export class Terminals {
     const browsing = Math.min(T.airside, T.retail.pods * RETAIL.pax);
     let rev = (browsing * RETAIL.spendPerHour[T.kind] * RETAIL.share * dt) / 3600;
     if (this.w.perks.includes('concession')) rev *= 1.2;
-    this.w.income(rev);
+    this.w.income(rev, 'retail');
     this.day.retail += rev;
   }
 
@@ -413,7 +413,7 @@ export class Terminals {
     T.airside = Math.max(0, T.airside - p.done);
     if (p.missed > 0) {
       this.day.missed += p.missed;
-      this.w.pay(p.missed * 2500);
+      this.w.pay(p.missed * 2500, 'compensation', { label: `${f.depNo}: ${p.missed} passengers compensated` });
       this.w.nudgeSatisfaction(-Math.min(6, p.missed * 0.12));
       this.w.note('warn', `${f.depNo}: ${p.missed} passenger${p.missed > 1 ? 's' : ''} missed the flight (${this.bottleneck(f).toLowerCase()} queue).`, { flight: f.id });
     }
@@ -487,8 +487,8 @@ export class Terminals {
     if (bad) return { ok: false, message: bad.why };
     if (plan.cost > this.w.money) return { ok: false, message: `Not enough money (needs ${fmtCr(plan.cost)})` };
     const t = this.w.t;
-    this.w.pay(Math.max(0, plan.cost));
-    if (plan.cost < 0) this.w.income(-plan.cost);
+    this.w.pay(Math.max(0, plan.cost), 'build', { label: `Terminal works: ${plan.items.length} item${plan.items.length > 1 ? 's' : ''}` });
+    if (plan.cost < 0) this.w.income(-plan.cost, 'sales', { label: 'Terminal equipment removed' });
     let n = 0;
     for (const i of plan.items) {
       const op = i.op;
@@ -550,7 +550,7 @@ export class Terminals {
     if (n > 0) {
       const cost = n * d.hire;
       if (this.w.money < cost) return { ok: false, message: 'Not enough money' };
-      this.w.pay(cost);
+      this.w.pay(cost, 'hiring', { label: `Hired ${n} × ${d.label.toLowerCase()}` });
       this.staff[dept] += n;
       return { ok: true, message: `Hired ${n} × ${d.label.toLowerCase()} (${fmtCr(cost)}, ${fmtCr(n * d.wage)} per day)` };
     }

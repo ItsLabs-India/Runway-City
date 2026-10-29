@@ -579,62 +579,157 @@ const CAR_COLOURS = ['#e9ecef', '#b9bfc6', '#2f3337', '#8e1f24', '#2c4f7c', '#6c
 
 // Each draws in local metres with the vehicle's front towards +x, centred on (0, 0).
 const VEHICLES = {
-  tug(ctx, v, d) {
+  // Baggage tractor: low body, engine hood with grille, open operator seat under a canopy roof, rotating
+  // beacon, tow pins front and rear.
+  tug(ctx, v, d, s, t) {
     shadowBox(ctx, 3.4, 1.9);
-    wheels(ctx, d, [[-1, -0.95], [1, -0.95], [-1, 0.95], [1, 0.95]], 0.7, 0.32);
-    body(ctx, -1.7, -0.95, 3.4, 1.9, '#e4b62c', 0.4);
-    if (d) {
-      ctx.fillStyle = '#c99c18';
-      ctx.fillRect(0.6, -0.8, 1, 1.6); // engine hood
-      ctx.fillStyle = '#2c3137';
-      ctx.fillRect(-0.9, -0.6, 0.8, 1.2); // seat
-      ctx.strokeStyle = '#2c3137';
-      ctx.lineWidth = 0.12;
-      ctx.beginPath();
-      ctx.arc(0.15, 0, 0.32, 0, Math.PI * 2); // steering wheel
-      ctx.stroke();
-      ctx.fillRect(-2.1, -0.12, 0.45, 0.24); // tow hitch
+    wheels(ctx, d, [[-1.05, -0.98], [1.05, -0.98], [-1.05, 0.98], [1.05, 0.98]], 0.72, 0.34);
+    body(ctx, -1.7, -0.92, 3.4, 1.84, '#e9b61c', 0.45);
+    if (!d) return;
+    ctx.fillStyle = '#cf9d0e';
+    roundRect(ctx, 0.35, -0.78, 1.25, 1.56, 0.35); // engine hood
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,45,5,0.55)';
+    ctx.lineWidth = 0.05;
+    ctx.beginPath();
+    for (let y = -0.55; y <= 0.56; y += 0.18) {
+      ctx.moveTo(1.15, y);
+      ctx.lineTo(1.5, y); // grille slats
     }
+    ctx.stroke();
+    ctx.fillStyle = '#2b3036';
+    roundRect(ctx, -1.25, -0.62, 0.95, 1.24, 0.18); // seat well
+    ctx.fill();
+    ctx.fillStyle = '#4a5560';
+    roundRect(ctx, -1.05, -0.4, 0.55, 0.8, 0.12); // seat
+    ctx.fill();
+    ctx.strokeStyle = '#1c2024';
+    ctx.lineWidth = 0.1;
+    ctx.beginPath();
+    ctx.arc(-0.05, 0, 0.28, 0, Math.PI * 2); // steering wheel
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(40,46,52,0.82)';
+    roundRect(ctx, -1.45, -0.86, 1.35, 1.72, 0.2); // canopy roof over the seat
+    ctx.fill();
+    ctx.fillStyle = '#f3f5f7';
+    ctx.fillRect(1.62, -0.75, 0.1, 0.3); // headlights
+    ctx.fillRect(1.62, 0.45, 0.1, 0.3);
+    ctx.fillStyle = '#3a4048';
+    ctx.fillRect(-2.05, -0.1, 0.38, 0.2); // tow pin, rear
+    ctx.fillRect(1.68, -0.1, 0.3, 0.2); // tow pin, front
+    ctx.fillStyle = Math.floor(t * 2.5) % 2 === 0 && v.moving ? '#ffb020' : '#c47a12';
+    dot(ctx, -0.8, 0, 0.17); // beacon on the canopy
   },
+  // Baggage cart (open, with side rails so the bags show), or a ULD dolly with an LD3 container for
+  // wide-bodies. `fill` 0..1: how full it is.
   cart(ctx, v, d) {
+    const fill = v.fill ?? 0.85;
     shadowBox(ctx, 3.2, 1.7);
-    wheels(ctx, d, [[-1.1, -0.85], [1.1, -0.85], [-1.1, 0.85], [1.1, 0.85]], 0.6, 0.28);
-    body(ctx, -1.6, -0.85, 3.2, 1.7, '#7d8690', 0.15);
-    ctx.fillStyle = '#5d656e';
-    ctx.fillRect(-1.45, -0.7, 2.9, 1.4);
-    if (d) {
-      // Bags in the cart, colours fixed per cart.
-      let s = (v.seed ?? 1) * 9301;
-      for (let i = 0; i < 6; i++) {
-        s = (s * 16807) % 2147483647;
-        ctx.fillStyle = SUITCASES[s % SUITCASES.length];
-        ctx.fillRect(-1.35 + (i % 3) * 0.95, -0.6 + Math.floor(i / 3) * 0.62, 0.8, 0.5);
+    wheels(ctx, d, [[-1.1, -0.86], [1.05, -0.86], [-1.1, 0.86], [1.05, 0.86]], 0.55, 0.26);
+    if (v.wide) {
+      // ULD dolly: roller bed, side stops, drawbar; LD3 container when loaded.
+      body(ctx, -1.6, -0.82, 3.2, 1.64, '#5c6670', 0.12);
+      if (d) {
+        ctx.strokeStyle = 'rgba(25,30,35,0.55)';
+        ctx.lineWidth = 0.05;
+        ctx.beginPath();
+        for (let x = -1.4; x <= 1.4; x += 0.28) {
+          ctx.moveTo(x, -0.7);
+          ctx.lineTo(x, 0.7); // rollers
+        }
+        ctx.stroke();
       }
-      ctx.fillStyle = '#3a4048';
-      ctx.fillRect(1.6, -0.08, 0.8, 0.16); // drawbar
+      if (fill > 0.4) {
+        const g = ctx.createLinearGradient(0, -0.78, 0, 0.78);
+        g.addColorStop(0, '#9aa3ab');
+        g.addColorStop(0.5, '#d5dade');
+        g.addColorStop(1, '#8a939b');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(-0.95, -0.76);
+        ctx.lineTo(0.62, -0.76);
+        ctx.lineTo(1.0, -0.4); // the contoured LD3 corner
+        ctx.lineTo(1.0, 0.76);
+        ctx.lineTo(-0.95, 0.76);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#59626b';
+        ctx.lineWidth = 0.06;
+        ctx.stroke();
+        if (d) {
+          ctx.fillStyle = '#c63b2f';
+          ctx.fillRect(-0.7, -0.15, 0.5, 0.3); // ULD tag
+        }
+      }
+    } else {
+      body(ctx, -1.6, -0.85, 3.2, 1.7, '#6c7580', 0.15);
+      ctx.fillStyle = '#4b535c';
+      ctx.fillRect(-1.45, -0.7, 2.9, 1.4); // bed
+      if (d) {
+        // Bags, as many as the cart holds right now, colours fixed per cart.
+        const n = Math.round(fill * 12);
+        let r = (v.seed ?? 1) * 9301 + 7;
+        for (let i = 0; i < n; i++) {
+          r = (r * 16807) % 2147483647;
+          const col = i % 4;
+          const row = Math.floor(i / 4) % 3;
+          ctx.fillStyle = SUITCASES[r % SUITCASES.length];
+          ctx.fillRect(-1.38 + col * 0.7 + (i >= 8 ? 0.15 : 0), -0.64 + row * 0.44, 0.6, 0.38);
+        }
+        ctx.fillStyle = '#c2c8ce';
+        ctx.fillRect(-1.6, -0.85, 3.2, 0.1); // side rails
+        ctx.fillRect(-1.6, 0.75, 3.2, 0.1);
+      }
+    }
+    if (d) {
+      ctx.fillStyle = '#2f353b';
+      ctx.fillRect(1.6, -0.06, 0.75, 0.12); // drawbar
+      ctx.fillRect(-1.85, -0.08, 0.25, 0.16); // rear hitch
     }
   },
-  beltLoader(ctx, v, d) {
+  // Belt loader: chassis with the driver's seat at the low end, a rubber conveyor with cleats between
+  // yellow handrails, bumper pads at the aircraft end. Bags ride the belt while it works.
+  beltLoader(ctx, v, d, s, t) {
     shadowBox(ctx, 8, 2.1);
-    wheels(ctx, d, [[-2.8, -1], [2.2, -1], [-2.8, 1], [2.2, 1]], 0.8, 0.3);
-    body(ctx, -4, -1.05, 8, 2.1, '#8f979f', 0.3);
-    ctx.fillStyle = '#26292d';
-    ctx.fillRect(-3.8, -0.5, 7.4, 1); // belt
-    if (d) {
-      ctx.strokeStyle = '#4a4f55';
-      ctx.lineWidth = 0.08;
-      ctx.beginPath();
-      for (let x = -3.6; x < 3.6; x += 0.5) {
-        ctx.moveTo(x, -0.5);
-        ctx.lineTo(x, 0.5);
-      }
-      ctx.stroke();
-      ctx.fillStyle = '#e4b62c';
-      ctx.fillRect(-4, -1.05, 8, 0.2); // side rails
-      ctx.fillRect(-4, 0.85, 8, 0.2);
-      ctx.fillStyle = '#2c3137';
-      ctx.fillRect(-1.2, 0.55, 0.9, 0.45); // driver seat on the side
+    wheels(ctx, d, [[-2.9, -1.02], [2.1, -1.02], [-2.9, 1.02], [2.1, 1.02]], 0.82, 0.32);
+    body(ctx, -4, -1.0, 8, 2.0, '#9aa2aa', 0.3);
+    const belt = ctx.createLinearGradient(-3.8, 0, 3.8, 0); // the raised end is lighter
+    belt.addColorStop(0, '#22252a');
+    belt.addColorStop(1, '#3a3f46');
+    ctx.fillStyle = belt;
+    ctx.fillRect(-3.8, -0.55, 7.4, 1.1);
+    if (!d) return;
+    // Cleats, moving when the belt runs.
+    const dir = v.flow === 'up' ? 1 : v.flow === 'down' ? -1 : 0;
+    const off = (((t * 0.9 * dir) % 0.5) + 0.5) % 0.5;
+    ctx.strokeStyle = '#555c64';
+    ctx.lineWidth = 0.06;
+    ctx.beginPath();
+    for (let x = -3.75 + off; x < 3.55; x += 0.5) {
+      ctx.moveTo(x, -0.5);
+      ctx.lineTo(x, 0.5);
     }
+    ctx.stroke();
+    // Bags on the belt.
+    if (dir !== 0) {
+      let r = (v.seed ?? 3) * 48271;
+      for (let k = 0; k < 6; k++) {
+        r = (r * 16807) % 2147483647;
+        const pos = ((((t * 0.9 * dir + k * 1.25) % 7.2) + 7.2) % 7.2) - 3.6;
+        ctx.fillStyle = SUITCASES[r % SUITCASES.length];
+        ctx.fillRect(pos - 0.32, -0.3 + (k % 2) * 0.12, 0.62, 0.42);
+      }
+    }
+    ctx.fillStyle = '#f0c419';
+    ctx.fillRect(0.6, -0.68, 3.2, 0.13); // handrails along the raised half
+    ctx.fillRect(0.6, 0.55, 3.2, 0.13);
+    ctx.fillStyle = '#111417';
+    ctx.fillRect(3.75, -0.62, 0.25, 1.24); // bumper pad at the aircraft end
+    ctx.fillStyle = '#2c3137';
+    roundRect(ctx, -3.6, 0.55, 1.3, 0.48, 0.12); // driver's seat on the side
+    ctx.fill();
+    ctx.fillStyle = Math.floor(t * 2.5) % 2 === 0 && v.moving ? '#ffb020' : '#c47a12';
+    dot(ctx, -3.2, -0.8, 0.14);
   },
   fuel(ctx, v, d) {
     shadowBox(ctx, 10.5, 2.6);
@@ -810,13 +905,14 @@ const VEHICLES = {
   },
 };
 
-export function drawVehicle(ctx, v, scale) {
+// simT: the game clock, for moving belts, bags and beacons.
+export function drawVehicle(ctx, v, scale, simT = 0) {
   const draw = VEHICLES[v.kind];
   if (!draw) return;
   ctx.save();
   ctx.translate(v.x, v.y);
   ctx.rotate(v.heading);
-  draw(ctx, v, scale > 2.5, scale);
+  draw(ctx, v, scale > 2.5, scale, simT);
   ctx.restore();
 }
 

@@ -5,6 +5,9 @@ import { AIRCRAFT_TYPES } from '../sim/aircraftTypes.js';
 import { cityName, distanceKm } from '../sim/airlines.js';
 import { registration } from '../sim/brands.js';
 import { esc } from '../logos.js';
+import { telemetry } from '../sim/telemetry.js';
+import { bagCounts, teamSize } from '../sim/groundcrew.js';
+import { dial, compass, spark } from './instruments.js';
 
 const hhmm = (t) => `${String(Math.floor((t % 86400) / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}`;
 const km = (m) => (m >= 10000 ? '10+ km' : m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m / 50) * 50} m`);
@@ -75,6 +78,25 @@ function turnaround(w, f) {
   return `<ul class="tasks">${rows}</ul>`;
 }
 
+// Jet bridges, ramp team and bags for the stand section.
+function groundLines(w, f, stand) {
+  if (!stand) return '';
+  const lines = [];
+  if (stand.contact) {
+    const bridges = w.bridgesFor(f);
+    const words = { parked: 'parked', docking: 'driving out to the door', docked: 'docked', retracting: 'driving back' };
+    if (bridges.length) {
+      lines.push(`Jet bridge${bridges.length > 1 ? 's' : ''} ${bridges.map((b) => `<b>${b.index + 1}L</b> ${words[b.state]}`).join(' · ')}`);
+    } else lines.push('No jet bridge reaches this stand: <b>stairs and buses</b>');
+  } else lines.push('Remote stand: <b>stairs and buses</b>');
+  if (f.phase === 'atStand' || f.tasks) {
+    lines.push(f.crew ? `Ramp team <b>${teamSize(f.type)} people</b> (lead and ${teamSize(f.type) - 1} baggage handlers)` : f.phase === 'atStand' ? '<span class="warn">No ramp team free yet</span>' : 'Ramp team released');
+    const b = bagCounts(f, w.t);
+    lines.push(`Bags off <b>${b.unloaded}/${b.bagsIn}</b> · bags on <b>${b.loaded}/${b.bagsOut}</b>${AIRCRAFT_TYPES[f.type].code === 'E' ? ' (in ULD containers)' : ''}`);
+  }
+  return lines.map((l) => `<p>${l}</p>`).join('');
+}
+
 function passengers(w, f) {
   const t = AIRCRAFT_TYPES[f.type];
   const p = f.pax;
@@ -102,8 +124,47 @@ function conditions(w, f) {
   return lines.map((l) => `<p>${l}</p>`).join('');
 }
 
+const num = (n) => Math.round(n).toLocaleString('en-IN');
+
+// Live flight data: instruments, readouts, configuration and the recent history.
+function liveData(w, f, ui) {
+  const x = telemetry(w, f);
+  if (!x.live) {
+    const due = f.phase === 'scheduled' ? ` · due ${hhmm(f.sta)}` : f.phase === 'inbound' && x.etaT ? ` · landing about ${hhmm(x.etaT)}` : '';
+    return `<p class="muted">${esc(x.note)}${due}</p><div class="kpis fd-grid"><span>Callsign <b>${esc(x.callsign)}</b></span><span>Squawk <b>${x.squawk}</b></span></div>`;
+  }
+  const heavy = x.type.wake === 'H';
+  const vs = Math.round(x.vsFpm / 50) * 50;
+  const dials = [
+    dial({ value: x.gs, min: 0, max: heavy ? 250 : 200, step: 10, major: heavy ? 50 : 50, label: x.ias === null ? 'Ground speed' : 'Speed', unit: 'KT', text: `${num(x.gs)} kt` }),
+    dial({ value: x.mslFt, min: 0, max: 4000, from: -135, to: 135, step: 250, major: 1000, label: 'Altitude', unit: 'FT', text: `${num(x.mslFt)} ft` }),
+    dial({ value: vs, min: -2000, max: 2000, from: -150, to: 150, step: 250, major: 1000, label: 'Vertical speed', unit: 'FPM', text: `${vs > 0 ? '+' : ''}${num(vs)}`, tone: vs < -1200 ? 'warn' : '' }),
+    compass(x.bearing),
+  ].join('');
+  const dist = x.dist === null ? null : x.dist >= 3000 ? `${(x.dist / 1852).toFixed(1)} NM` : `${num(x.dist)} m`;
+  const headTxt = `${Math.abs(Math.round(x.head))} kt ${x.head >= 0 ? 'headwind' : 'tailwind'}, ${Math.abs(Math.round(x.cross))} kt crosswind`;
+  const chip = (on, label) => `<span class="chip2 ${on ? 'on' : ''}">${label}</span>`;
+  const trace = ui?.trace?.id === f.id ? ui.trace.pts : null;
+  const lightsOn = (k) => x.lights.includes(k);
+  return `<div class="inst-row">${dials}</div>
+    <div class="kpis fd-grid">
+      <span>Ground speed <b>${num(x.gs)} kt</b></span><span>Airspeed <b>${x.ias === null ? '–' : `${num(x.ias)} kt`}</b></span>
+      <span>Altitude <b>${num(x.mslFt)} ft</b></span><span>Above ground <b>${num(x.aglFt)} ft</b></span>
+      <span>Altimeter setting <b>QNH ${x.qnh}</b></span><span>Vertical speed <b>${vs > 0 ? '+' : ''}${num(vs)} fpm</b></span>
+      <span>Heading <b>${String(Math.round(x.bearing) % 360).padStart(3, '0')}°</b></span><span>Wind on the aircraft <b>${esc(headTxt)}</b></span>
+      ${dist !== null ? `<span>Distance <b>${dist}</b><small>${esc(x.distLabel)}</small></span>` : x.distLabel ? `<span>Status <b>${esc(x.distLabel)}</b></span>` : ''}
+      ${x.etaT ? `<span>Touchdown <b>${hhmm(x.etaT)}</b></span>` : ''}
+      <span>Thrust ${x.n1 === null ? '' : '(estimate)'} <b>${x.n1 === null ? esc(x.engineNote || 'idle') : `N1 ${Math.round(x.n1)} %${x.reverse ? ' reverse' : ''}`}</b></span>
+      <span>Fuel on board (est.) <b>${x.fuel.toFixed(1)} t</b></span>
+      <span>Callsign <b>${esc(x.callsign)}</b></span><span>Squawk <b>${x.squawk}</b></span>
+    </div>
+    <div class="chips2">${chip(x.gearDown, `Gear ${x.gearDown ? 'down' : 'up'}`)}${chip(x.flaps !== 'UP', `Flaps ${esc(x.flaps)}`)}${chip(x.spoilers, 'Spoilers')}${chip(x.reverse, 'Reverse')}${chip(lightsOn('landing'), 'Landing lights')}${chip(lightsOn('taxi'), 'Taxi light')}${chip(lightsOn('beacon'), 'Beacon')}${chip(lightsOn('strobe'), 'Strobes')}</div>
+    <p class="muted fine">Reference speeds: approach ${num(x.vApp)} kt · V1 ${num(x.vRot - 5)} · rotate ${num(x.vRot)} · V2 ${num(x.vRot + 10)} kt. Thrust and fuel are estimates.</p>
+    ${trace && trace.length > 1 ? `<div class="traces"><div><small>Speed, last minutes</small>${spark(trace, 'gs', { unit: 'kt' })}</div><div><small>Altitude, last minutes</small>${spark(trace, 'alt', { unit: 'ft' })}</div></div>` : ''}`;
+}
+
 // Everything between the header and the action buttons of the flight card.
-export function flightDetails(w, f) {
+export function flightDetails(w, f, ui = null) {
   const t = AIRCRAFT_TYPES[f.type];
   const stand = f.standId !== null ? w.standById.get(f.standId) : null;
   const term = w.term.list[w.term.termFor(f)];
@@ -118,11 +179,12 @@ export function flightDetails(w, f) {
     <span>Engines <b>${t.engines}× ${esc(t.engineModel)}</b></span><span>Wake <b>${t.wake === 'H' ? 'Heavy' : 'Medium'}</b></span>
     <span>Size <b>${t.length} × ${t.span} m</b></span><span>Max weight <b>${t.mtow} t</b></span></div>`;
   const ground = `<div class="kpis fd-grid"><span>Stand <b>${stand ? esc(stand.ref) : '–'}</b></span><span>Boarding <b>${stand ? (stand.contact ? 'jet bridge' : 'bus, remote') : '–'}</b></span>
-    <span>Terminal <b>${esc(term?.name ?? '–')}</b></span><span>Stand size <b>${t.code === 'E' ? 'wide-body' : 'narrow-body'}</b></span></div>${turnaround(w, f)}`;
+    <span>Terminal <b>${esc(term?.name ?? '–')}</b></span><span>Stand size <b>${t.code === 'E' ? 'wide-body' : 'narrow-body'}</b></span></div>${groundLines(w, f, stand)}${turnaround(w, f)}`;
 
   const sec = (title, body) => `<section class="fd-sec"><h4>${title}</h4>${body}</section>`;
   return [
     sec('Status', status),
+    sec('Live data', liveData(w, f, ui)),
     sec('Route', route),
     sec('Timeline', timeline(w, f)),
     sec('Aircraft', aircraft),

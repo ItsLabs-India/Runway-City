@@ -43,9 +43,13 @@ async function cached(request, ttl, produce) {
   return out;
 }
 
+// A slow upstream feed must not hang the game: give up after a few seconds.
+const upstream = (url) => fetch(url, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(6000) });
+
 async function traffic() {
   const url = `https://opendata.adsb.fi/api/v3/lat/${CHENNAI.lat}/lon/${CHENNAI.lon}/dist/${CHENNAI.radiusNm}`;
-  const up = await fetch(url, { headers: { 'user-agent': UA } });
+  const up = await upstream(url).catch(() => null);
+  if (!up) return json({ error: 'adsb.fi did not answer in time' }, 504);
   if (!up.ok) return json({ error: `adsb.fi returned ${up.status}` }, 502);
   const data = await up.json();
   const aircraft = [];
@@ -71,7 +75,8 @@ async function traffic() {
 }
 
 async function metar() {
-  const up = await fetch('https://aviationweather.gov/api/data/metar?ids=VOMM&format=json', { headers: { 'user-agent': UA } });
+  const up = await upstream('https://aviationweather.gov/api/data/metar?ids=VOMM&format=json').catch(() => null);
+  if (!up) return json({ error: 'AWC did not answer in time' }, 504);
   if (!up.ok) return json({ error: `AWC returned ${up.status}` }, 502);
   const [m] = await up.json();
   if (!m) return json({ error: 'no METAR' }, 502);

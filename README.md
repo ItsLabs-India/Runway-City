@@ -11,7 +11,9 @@ A 2D top-down airport management game in the browser, inspired by Chennai's real
 - **Aircraft** land, taxi on the painted lines, park on a stand that fits, turn round, push back and take off. Gears stay on the lines (checked automatically). Eleven real types (ATR 72, Q400, A320neo, A321neo, 737-800, 737 MAX 8, 787-8, 787-9, A350-900, A340-300, 777-300ER) drawn from their real dimensions: wing planform, engines, winglets, tailplane, doors, flaps and slats that extend for landing.
 - **Real airlines:** 21 airlines (IndiGo, Air India Group, SpiceJet, Akasa, Emirates, Qatar, Singapore, Lufthansa, British Airways and more) with their corporate group, alliance and business model. Aircraft are painted in each airline's colours, map tags and flight lists carry its badge, and an **Airlines** view groups them by owner, alliance, type or region with today's on-time results.
 - **Weather, day and night:** random Chennai weather by season (north-east monsoon rain and thunderstorms, hot-season storms, winter mist), a real sun for the date, and night operations. The map darkens with sunrise, dusk and night; floodlights, runway, approach and taxiway lights, terminal windows and aircraft lights come on by rules. Rain, fog, lightning and wind change how the airport works (spacing, taxi speed, ramp work, runway closures). Weather can be set to Calm in the menu or the Operations panel.
-- **Flight details:** click any flight for an ordered card: status, the inbound and outbound route with distances, a timeline from final approach to take-off (planned, estimated and actual times, delays in minutes), aircraft (type, engines, size, a made-up registration), stand and turnaround progress, passengers and security progress, and the weather and runway conditions.
+- **Finance and management:** a Finance panel (key I, or click the cash) with today's income, expenses, profit and a projection, cash flow by hour, income and expenses by category, aeronautical income by airline, running costs and investment, per-departure and per-passenger figures, a day-by-day history, recent transactions, airport charges (discount / standard / premium) and a CSV export of the books. The day report shows where the money came from and went.
+- **Apron operations:** working jet bridges drive out to the aircraft door (two on wide-body stands) and back before push-back; belt loaders run bags down when unloading and up when loading, carts fill and empty, wide-bodies get ULD containers on dollies; ground staff are visible: ramp lead chocking the nose gear, baggage handlers carrying bags between carts and belt, fuellers, catering, cleaners, a marshaller with wands on remote stands, and a headset operator and two wing walkers on push-back.
+- **Flight details:** click any flight for an ordered card: status, live flight data (speed, altitude and vertical-speed dials, a heading compass, ground speed and airspeed, QNH, height above ground, distance to go, thrust, fuel, squawk, gear, flaps, spoilers and lights, plus speed and altitude charts of the last minutes), the inbound and outbound route with distances, a timeline from final approach to take-off (planned, estimated and actual times, delays in minutes), aircraft (type, engines, size, a made-up registration), stand and turnaround progress, passengers and security progress, and the weather and runway conditions.
 - **Passengers** queue at check-in, security, emigration, immigration and baggage reclaim. Long queues delay boarding and passengers miss flights.
 - **You run it:** quick-add and upgrade counters, lanes, desks and belts (or stage a whole expansion in plan mode), set staffing, shifts and hiring, reassign stands, switch the runway, buy ground equipment.
 - **Expand** with real projects: rapid-exit taxiways, CAT-III landing, fuel hydrant, Terminal 3 (new stands with jet bridges) and Terminal 5.
@@ -28,6 +30,9 @@ npm run check -- festival 24      # headless 24 h test: overlaps, stuck aircraft
 npm run check:terminals           # passenger system, save/load determinism, lever tests
 npm run test:ui                   # 62-check browser test in your Chrome (Playwright)
 npm run inspect                   # live gear-to-line inspection of every scenario
+npm run check:gridlock             # two-day replay of a ground deadlock found on 30 Oct 2026; traffic must keep flowing
+npm run check:finance              # the books balance, categories, charges, save/load
+npm run check:ground               # jet bridges meet the door and retract before push-back; staff and bags logic
 npm run check:flights              # flight details render for every flight and phase; milestones in order
 npm run check:weather              # sun, climate, determinism, lighting logic and weather rules
 npm run check:brands               # airline brand table: colours, contrast, callsigns
@@ -38,13 +43,15 @@ npm run import:timetable -- schedule.csv   # real timetable → public/data/time
 
 Deploy (free Cloudflare account): `npm run build && npx wrangler deploy`. This serves the game and the `/api` proxy together.
 
-Useful URLs: `?scenario=cyclone`, `?time=09:20`, `?speed=20`, `?warm=1800`, `?panel=term`, `?view=stands`.
+Useful URLs: `?scenario=cyclone`, `?time=09:20`, `?speed=30` (speeds 1, 3, 10, 30, 60), `?warm=1800`, `?panel=term`, `?view=stands`.
 
 | Control | Action |
 |---|---|
 | Drag / arrow keys / one finger | Move around |
 | Wheel / pinch / + − | Zoom |
-| Space, 1–5 | Pause, speed |
+| Space, 1–5 | Pause / resume; 1× (real time), 3× (normal), 10×, 30×, 60× |
+| F T P O I L | Flights, Terminals, Projects, Operations, Finance, Alerts |
+| H or ? | Keys and tips |
 | F T P O L | Flights, Terminals, Projects, Operations, Alerts |
 | Click an aircraft / stand / runway / terminal | Details and actions |
 | ☰ | Menu: scenarios, continue, save, export, import |

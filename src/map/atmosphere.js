@@ -335,7 +335,7 @@ export class Atmosphere {
     camera.applyTo(ctx, dpr);
     ctx.globalCompositeOperation = 'lighter';
     ctx.lineJoin = 'round';
-    const dot = clamp(2.2 / s, 1.6, 40); // a light is at least about two pixels
+    const dot = clamp(2.2 / s, 0.35, 40); // a light is about two pixels, but never bigger than a real fixture up close
     const glow = (x, y, r, color, alpha = 1) => {
       ctx.globalAlpha = alpha * k;
       const rr = Math.max(r, 3 / s) * wet;
@@ -358,9 +358,9 @@ export class Atmosphere {
         if (s > 0.2) {
           ctx.globalAlpha = k * 0.85;
           ctx.strokeStyle = '#3dff8a';
-          ctx.lineWidth = Math.max(1.1, 1.8 / s);
+          ctx.lineWidth = Math.max(0.35, 1.8 / s);
           ctx.lineCap = 'butt';
-          ctx.setLineDash([1.2, 13]);
+          ctx.setLineDash([Math.max(0.5, 1.2 / Math.max(1, s / 2)), 14]);
           ctx.stroke(data.taxiCentre);
           ctx.setLineDash([]);
         }

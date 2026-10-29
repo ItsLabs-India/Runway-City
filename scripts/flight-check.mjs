@@ -3,12 +3,15 @@
 import { readFile } from 'node:fs/promises';
 import { World } from '../src/sim/world.js';
 import { flightDetails } from '../src/ui/flightDetails.js';
+import { telemetry } from '../src/sim/telemetry.js';
 
 const map = JSON.parse(await readFile(new URL('../public/data/maa-map.json', import.meta.url), 'utf8'));
 const w = new World(map, { scenarioId: 'normal', startTime: Date.UTC(2026, 9, 29, 0, 30), weatherMode: 'calm' });
-const ORDER = ['Status', 'Route', 'Timeline', 'Aircraft', 'Stand and turnaround', 'Passengers', 'Conditions'];
+const ORDER = ['Status', 'Live data', 'Route', 'Timeline', 'Aircraft', 'Stand and turnaround', 'Passengers', 'Conditions'];
 const phases = new Set();
 let rendered = 0;
+let live = 0;
+const badTele = [];
 let badOrder = 0;
 let badTimes = 0;
 const seq = ['final', 'landed', 'onBlock', 'board', 'offBlock', 'airborne'];
@@ -22,6 +25,16 @@ for (let i = 0; i < 24 * 3600; i++) {
     const heads = [...html.matchAll(/<h4>([^<]+)<\/h4>/g)].map((m) => m[1]);
     if (heads.join('|') !== ORDER.join('|')) badOrder++;
     if (/undefined|NaN|\[object/.test(html)) badTimes++;
+    const x = telemetry(w, f);
+    if (x.live) {
+      live++;
+      const sq = x.squawk;
+      if (!/^[1-6][0-7]{3}$/.test(sq) || ['7500', '7600', '7700'].includes(sq)) badTele.push('squawk ' + sq);
+      if (!(x.gs >= 0 && x.gs < 270) || !(x.aglFt >= 0) || !(x.fuel > 0.5) || !Number.isFinite(x.bearing)) badTele.push(f.depNo + ' ' + f.phase + ' gs ' + x.gs + ' agl ' + x.aglFt + ' fuel ' + x.fuel);
+      if (f.phase === 'final' && f.alt > 1 && !(x.vsFpm < -400 && x.vsFpm > -1100)) badTele.push(f.depNo + ' final vs ' + x.vsFpm);
+      if (f.phase === 'final' && !(x.ias > 100 && x.ias < 200)) badTele.push(f.depNo + ' final ias ' + x.ias);
+      if (f.phase === 'atStand' && (x.gs !== 0 || x.n1 !== null)) badTele.push(f.depNo + ' parked but moving');
+    }
   }
 }
 // Milestones of every flight that completed its day must be in time order.
@@ -42,6 +55,7 @@ for (const phase of ['cancelled', 'diverted', 'holding', 'goAround']) {
 const ok = (name, pass, detail = '') => console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ` (${detail})` : ''}`);
 ok('every flight renders in every phase', rendered > 500 && badTimes === 0, `${rendered} cards, phases ${[...phases].join(', ')}`);
 ok('sections always come in the same order', badOrder === 0);
+ok('flight data is sane: speeds, heights, vertical speed, fuel, squawk', badTele.length === 0 && live > 100, badTele.slice(0, 3).join('; ') || live + ' live samples');
 ok('cancelled, diverted, holding and go-around cards render', rare === 0);
 ok('flight milestones are in time order', unordered === 0 && complete > 20, `${complete} flights with a full record`);
-process.exit(rare || badOrder || badTimes || unordered || complete <= 20 ? 1 : 0);
+process.exit(badTele.length || rare || badOrder || badTimes || unordered || complete <= 20 ? 1 : 0);

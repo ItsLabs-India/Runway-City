@@ -1,7 +1,7 @@
 import { Camera2D } from './map/camera.js';
 import { MapRenderer } from './map/renderer.js';
 import { bbox } from './map/geometry.js';
-import { World } from './sim/world.js';
+import { World, DEFAULT_TRAFFIC_BOOST, TRAFFIC_LEVELS } from './sim/world.js';
 import { standBlocker } from './sim/stands.js';
 import { AIRCRAFT_TYPES } from './sim/aircraftTypes.js';
 import { SCENARIOS } from './sim/scenarios.js';
@@ -11,7 +11,10 @@ import { createLineIndex, gearDeviation } from './sim/lineCheck.js';
 import { saveSlot, loadSlot, describe, decode, downloadSave } from './persist.js';
 import { fetchWeather, LiveTraffic } from './live/live.js';
 import { Radio } from './audio.js';
+import { Soundscape } from './soundscape.js';
 import { loadLogos } from './logos.js';
+import { sample } from './sim/telemetry.js';
+import { financeCsv } from './ui/financeUi.js';
 import './style.css';
 
 // Named views; ?view=terminals etc. opens on one (handy for testing). scale = px per metre.
@@ -21,7 +24,9 @@ const VIEWS = {
   stands: { x: -700, y: 1180, scale: 3 },
   gate: { x: -722, y: 1135, scale: 8 },
 };
-const SPEEDS = new Set([0, 1, 5, 20, 60]);
+// 1× is real time; the game normally runs at 3× (clock, services and movement all three times faster).
+const SPEEDS = new Set([0, 1, 3, 10, 30, 60]);
+const DEFAULT_SPEED = 3;
 const DAILY = ['normal', 'festival', 'bhogi', 'cyclone', 'outage'];
 const AUTOSAVE_MS = 20_000;
 
@@ -46,13 +51,15 @@ let world = null;
 let renderer = null;
 let selection = null; // { type: 'flight' | 'stand' | 'runway' | 'info', id?, info? }
 let standPick = null; // { flightId, valid: Map(standId -> reason | null) }
-let speed = params.has('speed') && SPEEDS.has(Number(params.get('speed'))) ? Number(params.get('speed')) : 1;
-let speedBeforeModal = 1;
+let speed = params.has('speed') && SPEEDS.has(Number(params.get('speed'))) ? Number(params.get('speed')) : DEFAULT_SPEED;
+let speedBeforeModal = DEFAULT_SPEED;
+let lastRunSpeed = speed || DEFAULT_SPEED; // what Space resumes
 let weatherTimer = null;
 let lastSave = 0;
 const radio = new Radio();
+const sound = new Soundscape(map);
 const traffic = new LiveTraffic(map.meta.ref);
-const ui = { boardView: 'board', group: 'none', agroup: 'group', airline: null, term: 'T1', plan: [], planMode: false, voice: false, live: { trafficOn: false, traffic: '', weather: '' }, ghosts: [] };
+const ui = { boardView: 'board', group: 'none', agroup: 'group', airline: null, term: 'T1', plan: [], planMode: false, voice: false, sound: false, live: { trafficOn: false, traffic: '', weather: '' }, ghosts: [] };
 
 const hud = createHud(document.getElementById('hud'), {
   onSpeed: (s) => {
@@ -70,6 +77,14 @@ const hud = createHud(document.getElementById('hud'), {
   },
   onAction: (action, arg) => act(action, arg),
 });
+
+// Reopen the panel that was open last time (unless the URL asks for one).
+try {
+  const lastTab = localStorage.getItem('rc-tab');
+  if (lastTab && !params.has('panel')) hud.openTab(lastTab);
+} catch {
+  // private mode
+}
 
 // ---- starting, saving, loading ---------------------------------------------------------------
 
@@ -92,6 +107,16 @@ function weatherPref() {
   }
 }
 
+// Traffic option for a normal day: +50 % flights by default, or none / +100 %. Remembered between visits.
+function trafficPref() {
+  try {
+    const v = Number(localStorage.getItem('rc-traffic'));
+    return localStorage.getItem('rc-traffic') !== null && TRAFFIC_LEVELS.includes(v) ? v : DEFAULT_TRAFFIC_BOOST;
+  } catch {
+    return DEFAULT_TRAFFIC_BOOST;
+  }
+}
+
 function dailyId() {
   const day = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
   let h = 0;
@@ -101,7 +126,7 @@ function dailyId() {
 
 function start(scenarioId, snap = null) {
   stopLive();
-  world = new World(map, { scenarioId, startTime: startTime(scenarioId), timetable: Array.isArray(timetable) ? timetable : null, weatherMode: weatherPref() });
+  world = new World(map, { scenarioId, startTime: startTime(scenarioId), timetable: Array.isArray(timetable) ? timetable : null, weatherMode: weatherPref(), trafficBoost: trafficPref() });
   if (snap) world.restore(snap);
   world.radioOn = ui.voice;
   renderer = new MapRenderer(canvas, map, world.stands, world.graph);
@@ -138,8 +163,10 @@ async function savedMeta() {
   }
 }
 
+let menuCanClose = false;
 async function openMenu(canClose) {
-  hud.showMenu({ saved: await savedMeta(), current: world?.scenarioId, daily: dailyId(), canClose, weatherMode: world?.weatherMode ?? weatherPref() });
+  menuCanClose = canClose;
+  hud.showMenu({ saved: await savedMeta(), current: world?.scenarioId, daily: dailyId(), canClose, weatherMode: world?.weatherMode ?? weatherPref(), traffic: trafficPref() });
 }
 
 async function importFile(file) {
@@ -226,6 +253,23 @@ function act(action, arg) {
       return openMenu(Boolean(world));
     case 'closeMenu':
       return hud.hideModal();
+    case 'help':
+      return hud.showHelp();
+    case 'closeHelp':
+      return hud.hideModal();
+    case 'tariff':
+      report(world.setTariff(arg));
+      break;
+    case 'exportFinance': {
+      const blob = new Blob([financeCsv(world)], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `runway-city-books-day${Math.floor(world.t / 86400) + 1}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      report({ ok: true, message: 'The books were exported as CSV' });
+      break;
+    }
     case 'scenario':
       return start(arg);
     case 'continue': {
@@ -242,7 +286,7 @@ function act(action, arg) {
     case 'perk': {
       report(world.acknowledgeReport(arg || null));
       hud.hideModal();
-      speed = speedBeforeModal || 1;
+      speed = speedBeforeModal || DEFAULT_SPEED;
       return refresh();
     }
     case 'copyResult': {
@@ -316,6 +360,15 @@ function act(action, arg) {
       } catch {
         // private mode: the choice just is not remembered
       }
+      break;
+    case 'traffic':
+      try {
+        localStorage.setItem('rc-traffic', String(Number(arg)));
+      } catch {
+        // private mode: the choice just is not remembered
+      }
+      openMenu(menuCanClose);
+      hud.toast(`Traffic on a normal day: ${Number(arg) ? `+${Math.round(Number(arg) * 100)} %` : 'standard'}. Applies to the next normal day you start.`);
       break;
     case 'lighting': {
       const [kind, value] = arg.split(':');
@@ -432,6 +485,9 @@ function act(action, arg) {
       world.radioOn = ui.voice;
       if (!radio.supported) hud.toast('This browser has no speech synthesis', false);
       break;
+    case 'sound':
+      setSound(!ui.sound, true);
+      break;
     default:
       break;
   }
@@ -458,24 +514,74 @@ camera.onClick = (sx, sy) => {
   return select(hit);
 };
 
-const TAB_KEYS = { f: 'board', t: 'term', p: 'proj', o: 'ops', l: 'log' };
+// ---- sound -------------------------------------------------------------------------------------
+// On by default, remembered between visits. Browsers only start audio after a tap or key press, so the
+// first one anywhere on the page switches it on.
+
+function soundPref() {
+  try {
+    return localStorage.getItem('rc-sound') !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+function setSound(on, remember) {
+  ui.sound = sound.enable(on);
+  if (remember) {
+    try {
+      localStorage.setItem('rc-sound', ui.sound ? 'on' : 'off');
+    } catch {
+      // private mode: the choice just isn't remembered
+    }
+  }
+  const b = document.querySelector('[data-sound]');
+  if (b) {
+    b.textContent = ui.sound ? '🔊' : '🔇';
+    b.setAttribute('aria-pressed', String(ui.sound));
+  }
+  if (on && !sound.supported) hud.toast('This browser has no Web Audio', false);
+  else if (remember) hud.toast(ui.sound ? 'Sound on: zoom in on aircraft and vehicles to hear them' : 'Sound off');
+}
+
+if (soundPref()) {
+  const unlock = (e) => {
+    if (e.type === 'keydown' && e.key.toLowerCase() === 'm') return; // M is the mute key, let it decide
+    window.removeEventListener('pointerdown', unlock);
+    window.removeEventListener('keydown', unlock);
+    if (!ui.sound && soundPref()) setSound(true, false);
+  };
+  window.addEventListener('pointerdown', unlock);
+  window.addEventListener('keydown', unlock);
+}
+// Safari and some phones suspend the context again after a tab switch.
+for (const ev of ['pointerdown', 'keydown']) window.addEventListener(ev, () => sound.resume(), { passive: true });
+
+const TAB_KEYS = { f: 'board', t: 'term', p: 'proj', o: 'ops', i: 'fin', l: 'log' };
 window.addEventListener('keydown', (e) => {
   if (e.target.matches?.('input, textarea, select') || e.ctrlKey || e.metaKey || e.altKey) return;
   const k = e.key.toLowerCase();
   if (k === 'escape') {
     if (standPick) act('cancelPick');
-    else if (hud.modalKind === 'menu' && world) hud.hideModal();
+    else if ((hud.modalKind === 'menu' && world) || hud.modalKind === 'help') hud.hideModal();
     else if (selection) select(null);
     else if (hud.tab) hud.openTab(null);
     return;
   }
+  if (k === 'm' && !hud.modalKind) return setSound(!ui.sound, true);
+  if ((k === 'h' || k === '?') && !hud.modalKind) return hud.showHelp();
   if (hud.modalKind) return;
   if (k === ' ' && e.target === document.body) {
     e.preventDefault();
-    speed = speed === 0 ? 1 : 0;
+    if (speed === 0) speed = lastRunSpeed;
+    else {
+      lastRunSpeed = speed;
+      speed = 0;
+    }
     refresh();
   } else if (/^[1-5]$/.test(k)) {
-    speed = [0, 1, 5, 20, 60][Number(k) - 1];
+    speed = [1, 3, 10, 30, 60][Number(k) - 1];
+    lastRunSpeed = speed;
     refresh();
   } else if (TAB_KEYS[k]) hud.openTab(hud.tab === TAB_KEYS[k] ? null : TAB_KEYS[k]);
 });
@@ -483,7 +589,25 @@ window.addEventListener('keydown', (e) => {
 document.addEventListener('visibilitychange', () => document.hidden && autosave(true));
 window.addEventListener('pagehide', () => autosave(true));
 
+// Keeps the last few minutes of speed and altitude of the selected flight, for the little charts.
+function sampleTrace() {
+  if (!world || selection?.type !== 'flight') {
+    ui.trace = null;
+    return;
+  }
+  const f = world.flights.find((x) => x.id === selection.id);
+  const s = f ? sample(world, f) : null;
+  if (!s) return;
+  if (ui.trace?.id !== f.id) ui.trace = { id: f.id, pts: [] };
+  const last = ui.trace.pts.at(-1);
+  if (!last || world.t - last.t >= 5 || world.t < last.t) {
+    ui.trace.pts.push(s);
+    if (ui.trace.pts.length > 150) ui.trace.pts.shift();
+  }
+}
+
 function refresh() {
+  sampleTrace();
   if (world) hud.update(world, selection, speed, ui);
 }
 
@@ -514,7 +638,7 @@ function frame(now) {
   if (world) {
     const modal = hud.modalKind !== null;
     if (world.pendingReport && !modal) {
-      speedBeforeModal = speed || 1;
+      speedBeforeModal = speed || DEFAULT_SPEED;
       speed = 0;
       hud.showReport(world.pendingReport);
     } else if (!modal) {
@@ -526,6 +650,7 @@ function frame(now) {
     camera.update(dt);
     ui.ghosts = traffic.status === 'live' ? traffic.ghosts() : [];
     renderer.draw(camera, world, { selected: selection, standPick, ghosts: ui.ghosts });
+    sound.update(dt, camera, world, { ghosts: ui.ghosts, speed, paused: modal });
     uiTimer += dt;
     if (uiTimer > 0.25) {
       uiTimer = 0;
@@ -546,6 +671,7 @@ window.__runway = {
   camera,
   ui,
   hud,
+  sound,
   act,
   start,
   traffic,

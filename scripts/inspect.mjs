@@ -1,5 +1,5 @@
 // Real-time browser inspection with Playwright (drives the locally installed Chrome).
-// Runs each scenario live at 20x, samples how far every moving aircraft's gears are from the
+// Runs each scenario live at 30x, samples how far every moving aircraft's gears are from the
 // painted lines, checks overlaps, FPS and console errors, and captures follow-camera close-ups
 // of runway exits, stand lead-ins, push-backs and line-ups.
 //
@@ -35,7 +35,7 @@ for (const scenario of scenarios) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
-  await page.goto(`http://localhost:4180/?scenario=${scenario}&speed=20&warm=900&time=${process.env.TIME ?? '07:00'}`);
+  await page.goto(`http://localhost:4180/?scenario=${scenario}&speed=30&warm=900&time=${process.env.TIME ?? '07:00'}`);
   await page.waitForFunction(() => window.__runway?.world, null, { timeout: 30000 });
 
   const stats = { samples: 0, over1m: 0, maxNose: 0, maxMain: 0, clashes: 0, maxMoving: 0 };
@@ -67,7 +67,7 @@ for (const scenario of scenarios) {
       await page.screenshot({ path: `${outDir}/${scenario}-${shot.name}.png` });
       await page.evaluate(() => {
         window.__runway.camera.following = null;
-        window.__runway.setSpeed(20);
+        window.__runway.setSpeed(30);
       });
     }
   }
