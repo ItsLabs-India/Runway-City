@@ -5,7 +5,8 @@ import { badge, esc } from '../logos.js';
 
 const pct = (x) => `${Math.round(x * 100)} %`;
 
-export const nameOf = (f) => (BRANDS[f.airline] ? BRANDS[f.airline].name : f.airlineName);
+// Freighters and general aviation show their operator (e.g. "Qatar Airways Cargo"), not the airline brand.
+export const nameOf = (f) => (f.service ? f.airlineName : BRANDS[f.airline] ? BRANDS[f.airline].name : f.airlineName);
 
 export function airlineLine(code) {
   const b = brandOf(code);

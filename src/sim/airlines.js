@@ -28,6 +28,31 @@ export const FOREIGN_AIRLINES = [
   { code: 'SV', name: 'Saudia', callsign: 'SAUDIA', dest: ['JED', 'RUH'], type: 'A20N', perDay: 1, banks: [6.3] },
 ];
 
+// Freighters at Chennai's cargo terminal: the overnight domestic express network (Blue Dart, Quikjet,
+// IndiGo CarGo) and the Gulf / European wide-body freighters. perDay may be a fraction (a few times a
+// week). banks: arrival hours (IST); ground: hours on the stand [min, max]; nums: flight-number range.
+export const CARGO_AIRLINES = [
+  { code: 'BZ', name: 'Blue Dart Aviation', callsign: 'BLUE DART', type: 'B738', perDay: 3, intl: false, dest: ['DEL', 'BOM', 'CCU', 'HYD'], banks: [0.6, 1.7, 3.1], ground: [2, 3.5], nums: [100, 900] },
+  { code: 'QO', name: 'Quikjet Cargo', callsign: 'QUIKJET', type: 'B738', perDay: 1, intl: false, dest: ['DEL', 'BOM'], banks: [2.4], ground: [2, 4], nums: [4000, 4900] },
+  { code: '6E', name: 'IndiGo CarGo', callsign: 'IFLY', type: 'A21N', perDay: 1, intl: false, dest: ['DEL', 'BOM', 'CCU'], banks: [1.2], ground: [2, 4], nums: [8000, 8900] },
+  { code: '9I', name: 'Alliance Air Cargo', callsign: 'ALLIED', type: 'AT76', perDay: 0.5, intl: false, dest: ['IXZ', 'IXM'], banks: [6.5], ground: [1.5, 2.5], nums: [8400, 8600] },
+  { code: 'QR', name: 'Qatar Airways Cargo', callsign: 'QATARI', type: 'B77F', perDay: 1, intl: true, dest: ['DOH'], banks: [5.4], ground: [3, 5], nums: [8000, 8900] },
+  { code: 'EK', name: 'Emirates SkyCargo', callsign: 'EMIRATES', type: 'B77F', perDay: 0.6, intl: true, dest: ['DXB'], banks: [14.2], ground: [3, 5], nums: [9000, 9900] },
+  { code: 'EY', name: 'Etihad Cargo', callsign: 'ETIHAD', type: 'B77F', perDay: 0.4, intl: true, dest: ['AUH'], banks: [17.5], ground: [3, 5], nums: [9000, 9900] },
+  { code: 'LH', name: 'Lufthansa Cargo', callsign: 'LUFTHANSA', type: 'B77F', perDay: 0.4, intl: true, dest: ['FRA'], banks: [11.3], ground: [3, 5], nums: [8000, 8900] },
+  { code: 'TK', name: 'Turkish Cargo', callsign: 'TURKISH', type: 'B77F', perDay: 0.4, intl: true, dest: ['IST'], banks: [20.4], ground: [3, 5], nums: [6000, 6900] },
+];
+
+// General aviation: business jets and turboprops of Indian charter operators, companies and private
+// owners (registrations VT-xxx). Type mix, movements a day, where they come from and hours on the ground.
+export const GENERAL_AVIATION = {
+  perDay: 6,
+  fleet: { B350: 0.4, C56X: 0.35, CL60: 0.25 },
+  dest: [['BLR', 3], ['BOM', 3], ['DEL', 3], ['HYD', 2], ['COK', 1], ['CJB', 1], ['IXM', 1], ['GOI', 1], ['PNQ', 1]],
+  hours: [6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18], // arrivals: business hours
+  ground: [1, 9], // hours; a quarter stay overnight
+};
+
 // Domestic destinations with relative frequency weight; `short` marks turboprop-friendly routes.
 export const DOMESTIC_DEST = [
   ['DEL', 'Delhi', 12], ['BOM', 'Mumbai', 11], ['HYD', 'Hyderabad', 7], ['CCU', 'Kolkata', 6], ['BLR', 'Bengaluru', 4, true],
@@ -41,6 +66,7 @@ export const DOMESTIC_DEST = [
 export const INTL_CITY = {
   MAA: 'Chennai', DXB: 'Dubai', DOH: 'Doha', AUH: 'Abu Dhabi', SIN: 'Singapore', FRA: 'Frankfurt', LHR: 'London Heathrow', CMB: 'Colombo',
   KUL: 'Kuala Lumpur', BKK: 'Bangkok', SHJ: 'Sharjah', MCT: 'Muscat', BAH: 'Bahrain', KWI: 'Kuwait', JED: 'Jeddah', RUH: 'Riyadh',
+  IST: 'Istanbul',
 };
 
 export const cityName = (code) => INTL_CITY[code] ?? DOMESTIC_DEST.find((d) => d[0] === code)?.[1] ?? code;
@@ -54,6 +80,7 @@ export const AIRPORTS = {
   IDR: [22.722, 75.801], IXJ: [32.689, 74.838], SXR: [33.987, 74.774],
   DXB: [25.253, 55.366], DOH: [25.273, 51.608], AUH: [24.433, 54.651], SIN: [1.364, 103.989], FRA: [50.033, 8.571], LHR: [51.47, -0.454], CMB: [7.18, 79.884],
   KUL: [2.746, 101.71], BKK: [13.69, 100.75], SHJ: [25.329, 55.517], MCT: [23.593, 58.284], BAH: [26.271, 50.634], KWI: [29.226, 47.969], JED: [21.68, 39.156], RUH: [24.958, 46.699],
+  IST: [41.262, 28.742],
 };
 
 // Great-circle distance between two airports in kilometres, or null if one is unknown.

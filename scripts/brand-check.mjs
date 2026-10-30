@@ -1,7 +1,7 @@
 // Checks the airline brand table: every airline in the sim has a brand, colours are valid and readable,
 // callsign prefixes are unique, alliances are real.  Usage: npm run check:brands
 import { BRANDS, ALLIANCES, onColour } from '../src/sim/brands.js';
-import { DOMESTIC_AIRLINES, FOREIGN_AIRLINES } from '../src/sim/airlines.js';
+import { DOMESTIC_AIRLINES, FOREIGN_AIRLINES, CARGO_AIRLINES } from '../src/sim/airlines.js';
 
 const problems = [];
 const hex = /^#[0-9a-f]{6}$/i;
@@ -12,7 +12,8 @@ const lum = (h) => {
 };
 const contrast = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
 
-for (const a of [...DOMESTIC_AIRLINES, ...FOREIGN_AIRLINES]) if (!BRANDS[a.code]) problems.push(`${a.code} (${a.name}) has no brand`);
+if (!BRANDS.GA) problems.push('GA (general aviation) has no brand');
+for (const a of [...DOMESTIC_AIRLINES, ...FOREIGN_AIRLINES, ...CARGO_AIRLINES]) if (!BRANDS[a.code]) problems.push(`${a.code} (${a.name}) has no brand`);
 const icao = new Map();
 for (const b of Object.values(BRANDS)) {
   for (const [k, v] of Object.entries({ primary: b.primary, secondary: b.secondary, ...b.livery })) {

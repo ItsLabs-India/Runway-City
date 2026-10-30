@@ -13,7 +13,11 @@
 //   stab / fin   horizontal tailplane (root leading edge, span, chords, sweep) and vertical fin
 //   nacelle      engine pod: d = diameter, len, y = spanwise position(s), fwd = how far the inlet sits
 //                ahead of the wing leading edge, chevrons = serrated exhaust, prop = propeller diameter
+//                rear = engines on the rear fuselage (business jets): x = inlet position from the nose,
+//                y = sideways offset of the pod centre
 //   doors/exits  passenger-door and overwing-exit positions (for the drawing)
+//   freighter    no cabin windows; freightT = maximum payload in tonnes (cargo flights use it for the
+//                tonnage; passenger types flown as converted freighters have it too)
 export const AIRCRAFT_TYPES = {
   AT76: {
     name: 'ATR 72-600', maker: 'ATR', engineModel: 'Pratt & Whitney Canada PW127M', props: true, engines: 2,
@@ -24,7 +28,7 @@ export const AIRCRAFT_TYPES = {
     fin: { le: 20.8, te: 25.6, tTail: true },
     nose: 3.2, tailCone: 7.0, tailEnd: 0.28,
     nacelle: { d: 0.95, len: 5.3, y: 4.1, fwd: 2.2, prop: 3.93, blades: 6 },
-    doors: [3.9, 22.6], exits: [],
+    doors: [3.9, 22.6], exits: [], freightT: 8.9, // ATR 72-600F
   },
   DH8D: {
     name: 'De Havilland Dash 8-400', maker: 'De Havilland Canada', engineModel: 'Pratt & Whitney Canada PW150A', props: true, engines: 2,
@@ -57,7 +61,7 @@ export const AIRCRAFT_TYPES = {
     fin: { le: 28.4, te: 36.4 },
     nose: 5.3, tailCone: 9.0, tailEnd: 0.5,
     nacelle: { d: 1.95, len: 4.5, y: 5.7, fwd: 2.0, flat: true },
-    doors: [5.7, 34.0], exits: [19.6, 21.0],
+    doors: [5.7, 34.0], exits: [19.6, 21.0], freightT: 23.9, // 737-800BCF
   },
   B38M: {
     name: 'Boeing 737 MAX 8', maker: 'Boeing', engineModel: 'CFM LEAP-1B', engines: 2,
@@ -79,7 +83,7 @@ export const AIRCRAFT_TYPES = {
     fin: { le: 33.3, te: 40.9 },
     nose: 5.0, tailCone: 8.6, tailEnd: 0.5,
     nacelle: { d: 2.3, len: 4.4, y: 5.75, fwd: 2.4 },
-    doors: [6.4, 38.8], exits: [20.4, 21.8, 27.0, 28.4],
+    doors: [6.4, 38.8], exits: [20.4, 21.8, 27.0, 28.4], freightT: 27.9, // A321P2F
   },
   B788: {
     name: 'Boeing 787-8', maker: 'Boeing', engineModel: 'GEnx-1B / Trent 1000', engines: 2,
@@ -136,9 +140,57 @@ export const AIRCRAFT_TYPES = {
     nacelle: { d: 4.0, len: 7.2, y: 10.6, fwd: 3.8, chevrons: false },
     doors: [8.6, 17.0, 29.0, 53.0, 62.0], exits: [34.0],
   },
+  // 777 Freighter: the 777-200LR airframe (10.1 m shorter than the -300ER: plugs ahead of and behind
+  // the wing), same wing and GE90 engines, one crew door and no cabin windows.
+  B77F: {
+    name: 'Boeing 777 Freighter', maker: 'Boeing', engineModel: 'GE90-110B1', engines: 2,
+    length: 63.73, span: 64.8, width: 6.2, mtow: 347.8, seats: 0, wake: 'H', code: 'E', turnMin: 120, approachKt: 149, rotateKt: 165,
+    noseGear: 0.359, wheelbase: 25.9,
+    wing: { root: 23.9, rootChord: 13.6, kink: 0.36, kinkChord: 8.4, tipChord: 2.3, sweep: 35, rake: { frac: 0.07, extra: 20 }, tip: { kind: 'raked' } },
+    stab: { root: 52.3, span: 21.3, rootChord: 7.0, tipChord: 2.5, sweep: 36 },
+    fin: { le: 48.3, te: 61.3 },
+    nose: 9.0, tailCone: 15.0, tailEnd: 0.9,
+    nacelle: { d: 4.0, len: 7.2, y: 10.6, fwd: 3.8, chevrons: false },
+    doors: [8.6], exits: [], freighter: true, freightT: 102,
+  },
+
+  // ---- General aviation ----------------------------------------------------------------------------
+  B350: {
+    name: 'Beechcraft King Air 350', maker: 'Textron Aviation', engineModel: 'Pratt & Whitney Canada PT6A-60A', props: true, engines: 2,
+    length: 14.22, span: 17.65, width: 1.6, mtow: 6.8, seats: 9, wake: 'L', code: 'B', turnMin: 20, approachKt: 100, rotateKt: 95,
+    noseGear: 0.366, wheelbase: 4.9,
+    wing: { root: 5.4, rootChord: 2.2, tipChord: 1.0, sweep: 2, tip: null },
+    stab: { root: 12.4, span: 5.6, rootChord: 1.5, tipChord: 0.9, sweep: 15 },
+    fin: { le: 10.9, te: 14.0, tTail: true },
+    nose: 1.7, tailCone: 4.0, tailEnd: 0.15,
+    nacelle: { d: 0.75, len: 4.0, y: 2.6, fwd: 1.6, prop: 2.67, blades: 4 },
+    doors: [10.3], exits: [],
+  },
+  C56X: {
+    name: 'Cessna Citation XLS+', maker: 'Textron Aviation', engineModel: 'Pratt & Whitney Canada PW545C', engines: 2,
+    length: 15.98, span: 17.17, width: 1.7, mtow: 9.2, seats: 9, wake: 'L', code: 'B', turnMin: 20, approachKt: 115, rotateKt: 110,
+    noseGear: 0.344, wheelbase: 6.3,
+    wing: { root: 5.9, rootChord: 2.6, tipChord: 1.1, sweep: 4, tip: null },
+    stab: { root: 13.2, span: 6.4, rootChord: 1.5, tipChord: 0.8, sweep: 22 },
+    fin: { le: 11.9, te: 15.6 },
+    nose: 2.4, tailCone: 4.0, tailEnd: 0.2,
+    nacelle: { rear: true, x: 10.0, d: 1.0, len: 2.9, y: 1.55 },
+    doors: [2.9], exits: [],
+  },
+  CL60: {
+    name: 'Bombardier Challenger 650', maker: 'Bombardier', engineModel: 'GE CF34-3B', engines: 2,
+    length: 20.86, span: 19.61, width: 2.69, mtow: 21.9, seats: 12, wake: 'M', code: 'B', turnMin: 25, approachKt: 125, rotateKt: 125,
+    noseGear: 0.356, wheelbase: 8.0,
+    wing: { root: 7.9, rootChord: 3.9, tipChord: 1.1, sweep: 28, tip: { kind: 'blended', chord: 0.9 } },
+    stab: { root: 18.0, span: 6.2, rootChord: 2.0, tipChord: 1.0, sweep: 35 },
+    fin: { le: 15.6, te: 20.1, tTail: true },
+    nose: 3.0, tailCone: 5.0, tailEnd: 0.3,
+    nacelle: { rear: true, x: 13.4, d: 1.35, len: 3.9, y: 2.3 },
+    doors: [3.6], exits: [],
+  },
 };
 
-export const CODE_RANK = { C: 1, D: 2, E: 3, F: 4 };
+export const CODE_RANK = { A: -1, B: 0, C: 1, D: 2, E: 3, F: 4 };
 
 // Neutral tail colours for generic liveries (deliberately not any airline's brand colours).
 export const GENERIC_TAILS = ['#3d6fa8', '#5b8c5a', '#8a5a9e', '#c0803a', '#4b8f9a', '#a54b4b', '#6a6f78'];

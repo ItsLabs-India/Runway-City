@@ -1,7 +1,7 @@
 // Generates a realistic day of rotations at MAA (one aircraft: arrival → turnaround → departure).
 // Deterministic per day seed. Times are seconds since IST midnight of day 0.
 import { AIRCRAFT_TYPES } from './aircraftTypes.js';
-import { DOMESTIC_AIRLINES, FOREIGN_AIRLINES, DOMESTIC_DEST } from './airlines.js';
+import { DOMESTIC_AIRLINES, FOREIGN_AIRLINES, DOMESTIC_DEST, CARGO_AIRLINES, GENERAL_AVIATION } from './airlines.js';
 import { seeded } from '../map/geometry.js';
 
 const REAL_DAILY_DEPARTURES = 206; // summer 2026 count from the research notes
@@ -12,7 +12,7 @@ const DOMESTIC_HOURLY = [1, 0.5, 0.3, 0.3, 0.6, 2.2, 4.2, 5, 5.2, 5, 4.6, 4.2, 3
 // `boost` is the Traffic option: 0.5 = half as many flights again as the scenario's own level, 1 = double.
 export function buildSchedule({ daySeed = 1, traffic = 0.7, rush = 1, day = 0, timetable = null, boost = 0 } = {}) {
   const rnd = seeded(daySeed * 7919 + day * 104729);
-  if (timetable?.length) return fromTimetable({ daySeed, day, timetable, traffic, rush, rnd, boost });
+  if (timetable?.length) return [...fromTimetable({ daySeed, day, timetable, traffic, rush, rnd, boost }), ...cargoAndGa({ daySeed, day, traffic, rush, boost })].sort((p, q) => p.sta - q.sta);
   const pick = (weights) => {
     const total = weights.reduce((a, w) => a + w, 0);
     let r = rnd() * total;
@@ -70,8 +70,61 @@ export function buildSchedule({ daySeed = 1, traffic = 0.7, rush = 1, day = 0, t
     const num = flightNumber(a.code, 100, 7800);
     rotations.push(makeRotation(++id, a, type, intl, dest, num, sta, sta + ground, rnd));
   }
+  rotations.push(...cargoAndGa({ daySeed, day, traffic, rush, boost }));
   rotations.sort((p, q) => p.sta - q.sta);
   return rotations;
+}
+
+// Freighters and general aviation. Their own random stream, so adding them leaves every passenger
+// flight of the day exactly as it was (saves and checks stay comparable). service: 'cargo' | 'ga'.
+function cargoAndGa({ daySeed, day, traffic, rush, boost }) {
+  const rnd = seeded(daySeed * 6271 + day * 15485863 + 17);
+  const base = day * 86400;
+  const scale = Math.min(1.5, traffic * rush + 0.15) * (1 + boost); // a normal day ≈ 1, +50 % traffic ≈ 1.5
+  const count = (perDay) => {
+    const n = perDay * scale;
+    return Math.floor(n) + (rnd() < n - Math.floor(n) ? 1 : 0);
+  };
+  const out = [];
+  let id = day * 10000 + 9000;
+
+  for (const a of CARGO_AIRLINES) {
+    const n = count(a.perDay);
+    for (let k = 0; k < n; k++) {
+      const sta = base + Math.round((a.banks[k % a.banks.length] + (k >= a.banks.length ? 2.5 : 0) + (rnd() - 0.5) * 0.6) * 3600);
+      const ground = (a.ground[0] + rnd() * (a.ground[1] - a.ground[0])) * 3600;
+      const num = a.nums[0] + 2 * Math.floor(rnd() * ((a.nums[1] - a.nums[0]) / 2));
+      const dest = a.dest[Math.floor(rnd() * a.dest.length)];
+      const r = makeRotation(++id, a, a.type, a.intl, dest, num, sta, sta + ground, rnd);
+      const cap = AIRCRAFT_TYPES[a.type].freightT;
+      Object.assign(r, { service: 'cargo', paxIn: 0, paxOut: 0, cargoIn: Math.round(cap * (0.55 + rnd() * 0.4) * 10) / 10, cargoOut: Math.round(cap * (0.5 + rnd() * 0.45) * 10) / 10 });
+      out.push(r);
+    }
+  }
+
+  const ga = GENERAL_AVIATION;
+  const types = Object.keys(ga.fleet);
+  const pickW = (items, w) => {
+    let x = rnd() * w.reduce((s, v) => s + v, 0);
+    for (let i = 0; i < items.length; i++) if ((x -= w[i]) <= 0) return items[i];
+    return items.at(-1);
+  };
+  const letters = 'ABCDEFGHJKLMNPRSTUVWXYZ';
+  const n = count(ga.perDay);
+  for (let k = 0; k < n; k++) {
+    const type = pickW(types, types.map((t) => ga.fleet[t]));
+    const reg = `VT-${Array.from({ length: 3 }, () => letters[Math.floor(rnd() * letters.length)]).join('')}`;
+    const dest = pickW(ga.dest.map((d) => d[0]), ga.dest.map((d) => d[1]));
+    const sta = base + Math.round((ga.hours[Math.floor(rnd() * ga.hours.length)] + rnd()) * 3600);
+    const overnight = rnd() < 0.25;
+    const ground = overnight ? (14 + rnd() * 4) * 3600 : (ga.ground[0] + rnd() * (ga.ground[1] - ga.ground[0])) * 3600;
+    const op = { code: 'GA', name: 'General aviation', callsign: reg };
+    const r = makeRotation(++id, op, type, false, dest, 0, sta, sta + ground, rnd);
+    const aboard = 1 + Math.floor(rnd() * Math.min(8, AIRCRAFT_TYPES[type].seats));
+    Object.assign(r, { service: 'ga', arrNo: reg, depNo: reg, registration: reg, paxIn: 0, paxOut: 0, aboardIn: aboard, aboardOut: Math.max(1, aboard + Math.floor(rnd() * 3) - 1) });
+    out.push(r);
+  }
+  return out;
 }
 
 // A real timetable (public/data/timetable.json, made with scripts/import-timetable.mjs): every row

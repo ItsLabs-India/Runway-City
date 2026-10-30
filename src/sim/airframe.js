@@ -97,8 +97,9 @@ export function airframe(code) {
   const engines = [];
   for (const y of Array.isArray(n.y) ? n.y : [n.y]) {
     for (const side of [-1, 1]) {
-      // The inlet face sits `fwd` metres ahead of the wing leading edge (larger x = nearer the nose).
-      engines.push({ x: le(y) + n.fwd, y: side * y, side, len: n.len, r: n.d / 2 });
+      // Under-wing pods: the inlet face sits `fwd` metres ahead of the wing leading edge (larger x =
+      // nearer the nose). Rear-fuselage pods (business jets): the inlet is `x` metres from the nose.
+      engines.push({ x: n.rear ? X(n.x) : le(y) + n.fwd, y: side * y, side, len: n.len, r: n.d / 2, rear: Boolean(n.rear) });
     }
   }
 

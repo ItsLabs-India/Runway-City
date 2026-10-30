@@ -13,6 +13,8 @@ import { logoImage } from '../logos.js';
 import { Atmosphere } from './atmosphere.js';
 import { shadowOf } from '../sim/sky.js';
 
+const shown = (s) => !s.locked && s.usable !== false;
+
 const C = {
   land: '#ebe6da',
   water: '#a7cde4',
@@ -80,10 +82,11 @@ export class MapRenderer {
     this.world = this.#build();
   }
 
-  // Stands that are locked (Terminal 3 before it is built) have no paint, label or pick target.
+  // Stands that are locked (Terminal 3 before it is built) or that no aircraft fits (OSM bay points
+  // on grass or against a taxiway) have no paint, label or pick target.
   #build() {
-    const hide = new Set(this.standsAll.filter((s) => s.locked).map((s) => s.id));
-    return buildWorld(this.map, this.standsAll.filter((s) => !s.locked), this.graph, hide);
+    const hide = new Set(this.standsAll.filter((s) => !shown(s)).map((s) => s.id));
+    return buildWorld(this.map, this.standsAll.filter(shown), this.graph, hide);
   }
 
   resize() {
@@ -239,7 +242,7 @@ export class MapRenderer {
       ctx.stroke();
     };
     for (const st of sim.stands) {
-      if (st.locked) continue;
+      if (!shown(st)) continue;
       if (st.closed) {
         const r = 10;
         ctx.strokeStyle = '#d93025';
@@ -290,7 +293,7 @@ export class MapRenderer {
     const h = this.hit;
     h.setTransform(1, 0, 0, 1, 0, 0);
     for (const st of sim.stands) {
-      if (!st.locked && Math.hypot(st.x - x, st.y - y) < Math.max(12, slack)) return { type: 'stand', id: st.id };
+      if (shown(st) && Math.hypot(st.x - x, st.y - y) < Math.max(12, slack)) return { type: 'stand', id: st.id };
     }
     for (const f of this.world.features) {
       if (!f.box || (x >= f.box.minX - slack && x <= f.box.maxX + slack && y >= f.box.minY - slack && y <= f.box.maxY + slack)) {

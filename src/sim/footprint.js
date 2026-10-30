@@ -138,16 +138,15 @@ export function segmentHitsPolygon(a, b, poly) {
 
 // Desired spots per service (local frame): position, heading and the direction to slide if blocked.
 function serviceTemplate(code) {
-  const { L, S, r, rootLE, rootChord, sweep } = dims(code);
+  const { L, S, r, rootLE, sweep } = dims(code);
   const wide = AIRCRAFT_TYPES[code].code === 'E';
   const aftDoor = -L * 0.25;
   const fwdHold = L * 0.27;
-  const behindWingRoot = rootLE - rootChord - r * sweep - 7;
   return {
     beltAft: { kind: 'beltLoader', x: aftDoor, y: r + 3.3, h: -Math.PI / 2 + 0.45, push: [0, 1] },
     tugAft: { kind: 'tug', x: aftDoor + 2, y: r + 11.5, h: 0, push: [0, 1], carts: wide ? 4 : 3 }, // carts trail aft
     beltFwd: { kind: 'beltLoader', x: fwdHold, y: r + 3.3, h: -Math.PI / 2 - 0.45, push: [0, 1] },
-    fuel: { kind: 'fuel', x: behindWingRoot, y: r + 6.5, h: 0, push: [-1, 0.35] },
+    fuel: { kind: 'fuel', x: rootLE + 3, y: r + 8, h: 0, push: [0.3, 1] }, // ahead of the wing, away from the taxilane behind
     catering: { kind: 'catering', x: L * 0.38, y: r + 4.6, h: -Math.PI / 2, push: [0.4, 1] },
     water: { kind: 'water', x: -L * 0.42, y: -(r + 3.6), h: Math.PI / 2, push: [-0.3, -1] },
     gpu: { kind: 'gpu', x: L * 0.44, y: r + 2.4, h: 0, push: [0.5, 1] },

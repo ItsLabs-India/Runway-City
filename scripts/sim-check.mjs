@@ -15,7 +15,7 @@ const started = performance.now();
 const world = new World(map, { scenarioId: scenario, startTime: Date.UTC(2026, 9, 29, 0, 30) });
 console.log(`init ${Math.round(performance.now() - started)} ms · ${world.flights.length} rotations · runway ${world.active}`);
 
-const counts = { aircraftClash: 0, vehicleOnAircraft: 0, groundProximity: 0, maxGround: 0, maxParked: 0, maxVehicles: 0 };
+const counts = { aircraftClash: 0, vehicleOnAircraft: 0, groundProximity: 0, taxiOverParked: 0, taxiOverVehicle: 0, maxGround: 0, maxParked: 0, maxVehicles: 0 };
 const stuck = new Map();
 const GROUND = ['taxiIn', 'taxiOut', 'pushback', 'turning', 'holdShort', 'lineUp'];
 const clashLog = [];
@@ -67,7 +67,27 @@ for (let i = 0; i < steps; i++) {
       const fa = ground[a];
       const fb = ground[b];
       if (Math.hypot(fa.x - fb.x, fa.y - fb.y) > 100) continue;
-      if (partsOverlap(aircraftFootprint(fa.type, fa.x, fa.y, fa.heading), aircraftFootprint(fb.type, fb.x, fb.y, fb.heading))) counts.groundProximity++;
+      if (partsOverlap(aircraftFootprint(fa.type, fa.x, fa.y, fa.heading), aircraftFootprint(fb.type, fb.x, fb.y, fb.heading))) {
+        counts.groundProximity++;
+        if (clashLog.length < 8) clashLog.push(`taxiing ${fa.depNo} ${fa.phase} "${fa.waiting}" ghost=${fa.ghostUntil > world.t} vs ${fb.depNo} ${fb.phase} "${fb.waiting}" ghost=${fb.ghostUntil > world.t}`);
+      }
+    }
+  }
+  // Taxiing aircraft (wings included) over a parked aircraft or another flight's working vehicle.
+  const working = world.vehicleSprites().filter((v) => v.kind !== 'cone' && world.vehicles.find((x) => x.id === v.vehicleId)?.state === 'working');
+  for (const f of ground) {
+    const parts = aircraftFootprint(f.type, f.x, f.y, f.heading);
+    for (const p of prints) {
+      if (p.f === f || Math.hypot(p.f.x - f.x, p.f.y - f.y) > 110) continue;
+      if (partsOverlap(parts, p.parts)) {
+        counts.taxiOverParked++;
+        if (clashLog.length < 8) clashLog.push(`${f.depNo} ${f.phase} (${f.type}) over parked ${p.f.depNo} (${p.f.type}) at stand ${world.standById.get(p.f.standId)?.ref}`);
+      }
+    }
+    for (const v of working) {
+      const veh = world.vehicles.find((x) => x.id === v.vehicleId);
+      if (!veh || veh.flightId === f.id || Math.hypot(v.x - f.x, v.y - f.y) > 80) continue;
+      if (parts.some((part) => convexOverlap(vehiclePolygon(v.kind, v.x, v.y, v.heading), part))) counts.taxiOverVehicle++;
     }
   }
   // Stuck detection: on the ground, not moving, same phase for 45 min.
@@ -92,7 +112,7 @@ console.log(`arrivals ${k.arrivals} · departures ${k.departures} · on-time ${k
 console.log(`diversions ${k.diversions} · cancellations ${k.cancellations} · go-arounds ${k.goArounds} · conflict overrides ${k.conflictsIgnored} · satisfaction ${Math.round(k.satisfaction)}`);
 console.log(`revenue ${formatINR(k.revenue)} · costs ${formatINR(k.costs)} · money ${formatINR(world.money)}`);
 console.log(`peaks: ${counts.maxGround} taxiing, ${counts.maxParked} parked, ${counts.maxVehicles} vehicles`);
-console.log(`OVERLAPS (sampled each minute): parked aircraft ${counts.aircraftClash}, vehicle on aircraft ${counts.vehicleOnAircraft}, taxiing aircraft ${counts.groundProximity}`);
+console.log(`OVERLAPS (sampled each minute): parked aircraft ${counts.aircraftClash}, vehicle on aircraft ${counts.vehicleOnAircraft}, taxiing aircraft ${counts.groundProximity}, taxiing over parked aircraft ${counts.taxiOverParked}, taxiing over working vehicles ${counts.taxiOverVehicle}`);
 if (clashLog.length) console.log('examples:', clashLog.join('; '));
 console.log(
   `stuck on the ground > 45 min: ${stuckList.length}`,

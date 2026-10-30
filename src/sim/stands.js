@@ -6,6 +6,11 @@ import { pointInPolygon, closestOnPolyline } from '../map/geometry.js';
 
 const NOSE_GAP_M = 4; // nose stop point to nose
 const NEIGHBOUR_RADIUS_M = 160;
+// ICAO code C taxilane centreline to object: every parked aircraft (tail included) stays this far from
+// every taxi line, so a narrow-body can always pass it. Wider aircraft are kept off lines next to
+// occupied stands by the router (`World` wingtip rule).
+export const TAXI_CLEAR_M = 24.5;
+const OFF_APRON_MAX = 0.02; // share of the outline allowed past the (hand-drawn) OSM apron edge
 
 export function parkedPose(stand, type) {
   const L = AIRCRAFT_TYPES[type].length;
@@ -50,10 +55,45 @@ const boxOf = (pts) => {
 };
 const boxesTouch = (a, b, m = 0) => a.minX - m <= b.maxX && a.maxX + m >= b.minX && a.minY - m <= b.maxY && a.maxY + m >= b.minY;
 
-export function buildStands(orientedStands, map) {
-  const terminals = map.buildings.filter((b) => b.kind === 'terminal');
+// Points every ~1.5 m around a polygon, for "is all of it inside / how close does it come" tests.
+export function outlinePoints(poly, step = 1.5) {
+  return poly.flatMap((p, i) => {
+    const q = poly[(i + 1) % poly.length];
+    const n = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / step));
+    return Array.from({ length: n }, (_, k) => [p[0] + ((q[0] - p[0]) * k) / n, p[1] + ((q[1] - p[1]) * k) / n]);
+  });
+}
+
+export function segmentDistance([px, py], [ax, ay], [bx, by]) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(px - ax - t * dx, py - ay - t * dy);
+}
+
+// Smallest distance from a set of points to a set of segments ({ a, b, box }), only looking at
+// segments whose box is within `reach` of the points.
+export function clearance(points, segments, reach = 60) {
+  const box = boxOf(points);
+  let best = Infinity;
+  for (const s of segments) {
+    if (!boxesTouch(box, s.box, reach)) continue;
+    for (const p of points) best = Math.min(best, segmentDistance(p, s.a, s.b));
+  }
+  return best;
+}
+
+// taxiLines: every taxiway / taxilane centreline segment, [[ax, ay], [bx, by]].
+export function buildStands(orientedStands, map, taxiLines = []) {
+  // The cargo terminal is tagged a terminal in OSM, but no passenger goes there.
+  const isCargo = (b) => /cargo/i.test(b.name ?? '');
+  const terminals = map.buildings.filter((b) => b.kind === 'terminal' && !isCargo(b));
+  const cargoTerminals = map.buildings.filter((b) => b.kind === 'terminal' && isCargo(b));
   const buildingBoxes = map.buildings.map((b) => ({ b, box: boxOf(b.polygon) }));
-  const apronBoxes = map.aprons.map((a) => ({ a, box: boxOf(a.polygon) }));
+  const apronAreas = map.aprons.map((a) => ({ poly: a.polygon, box: boxOf(a.polygon) }));
+  const grassAreas = (map.grass ?? []).map((g) => ({ poly: g, box: boxOf(g) }));
+  const lines = taxiLines.map(([a, b]) => ({ a, b, box: boxOf([a, b]) }));
+  const inAny = (p, list) => list.some((o) => p[0] >= o.box.minX && p[0] <= o.box.maxX && p[1] >= o.box.minY && p[1] <= o.box.maxY && pointInPolygon(p, o.poly));
   const bridges = map.jetBridges.flatMap((j) =>
     j.points.slice(1).map((p, i) => {
       const a = j.points[i];
@@ -68,6 +108,7 @@ export function buildStands(orientedStands, map) {
       if (d < best) [best, terminal] = [d, t];
     }
     const kind = best < 220 && terminal ? (/international/i.test(terminal.name) ? 'intl' : 'dom') : 'remote';
+    const cargoDist = Math.min(Infinity, ...cargoTerminals.map((t) => (pointInPolygon([s.x, s.y], t.polygon) ? 0 : closestOnPolyline([s.x, s.y], t.polygon).dist)));
     const fits = {};
     const footprints = {};
     const service = {};
@@ -82,16 +123,20 @@ export function buildStands(orientedStands, map) {
         .filter((sp) => sp.kind !== 'cone')
         .flatMap((sp) => sp.pieces)
         .map((p) => vehiclePolygon(p.kind, pose.x + p.x * c - p.y * sn, pose.y + p.x * sn + p.y * c, pose.heading + p.h, 0.3));
-      const here = { minX: pose.x, minY: pose.y, maxX: pose.x, maxY: pose.y };
-      const onApron = apronBoxes.some(({ a, box }) => boxesTouch(box, here, 25) && (pointInPolygon([pose.x, pose.y], a.polygon) || closestOnPolyline([pose.x, pose.y], a.polygon).dist < 25));
+      // The whole aircraft (not just its centre) must stand on apron, never on grass. Terminal 3 stands
+      // are exempt: the project paves its own apron.
+      const outline = parts.flatMap((p) => outlinePoints(p));
+      const offApron = s.t3 ? 0 : outline.filter((p) => !inAny(p, apronAreas)).length / outline.length;
+      const onGrass = !s.t3 && outline.some((p) => inAny(p, grassAreas));
       const partBoxes = parts.map(boxOf);
       const hitsBuilding = parts.some((p, i) => buildingBoxes.some(({ b, box }) => boxesTouch(box, partBoxes[i]) && crossesPolygon(p, b.polygon)));
       const hitsBridge = parts.slice(1).some((p) => bridges.some((b) => convexOverlap(p, b))); // fuselage nose may meet its bridge
-      // The lead-in must be long enough that the parked tail stays clear of the taxilane.
-      const longEnough = (s.leadIn ?? Infinity) >= AIRCRAFT_TYPES[type].length * 0.75 + 8;
-      fits[type] = onApron && !hitsBuilding && !hitsBridge && longEnough;
+      // Wings, nose and tail stay clear of every taxi line (its own taxilane included).
+      const clear = clearance(outline, lines) >= TAXI_CLEAR_M;
+      fits[type] = offApron <= OFF_APRON_MAX && !onGrass && !hitsBuilding && !hitsBridge && clear;
     }
-    return { ...s, terminal: terminal?.name ?? '', kind, fits, footprints, service, bookings: [], closed: false, occupant: null };
+    const usable = Object.values(fits).some(Boolean);
+    return { ...s, terminal: terminal?.name ?? '', kind, cargoDist, fits, footprints, service, usable, bookings: [], closed: !usable, occupant: null };
   });
   for (const s of stands) {
     s.neighbours = stands.filter((o) => o !== s && Math.hypot(o.x - s.x, o.y - s.y) < NEIGHBOUR_RADIUS_M);
@@ -115,6 +160,10 @@ export function standBlocker(stand, type, t0, t1, ignoreFlightId = null) {
     for (const b of n.bookings) {
       if (b.flightId === ignoreFlightId || !overlapsTime(t0, t1, b.from, b.to)) continue;
       if (partsOverlap(stand.footprints[type], n.footprints[b.type])) return `Wingtip clash with stand ${n.ref}`;
+      // One of the two could not push back past the other, whichever way it turned.
+      if (stand.pushBlocksOf?.(type).has(`${n.id}:${b.type}`) || n.pushBlocksOf?.(b.type).has(`${stand.id}:${type}`)) return `Push-back clash with stand ${n.ref}`;
+      // A wide-body could not taxi in or out past the other without its wing sweeping over it.
+      if (stand.accessBlocked?.(type, n.id, b.type) || n.accessBlocked?.(b.type, stand.id, type)) return `Taxilane next to stand ${n.ref} too narrow while it is occupied`;
       // Turnaround vehicles of one stand may not end up under the other stand's aircraft.
       if (partsOverlap(stand.service[type], n.footprints[b.type]) || partsOverlap(stand.footprints[type], n.service[b.type])) {
         return `Service area clash with stand ${n.ref}`;
@@ -133,11 +182,20 @@ export function unbook(stand, flightId) {
 }
 
 // Best stand for a flight: prefers a contact stand at the right terminal, then any terminal stand,
-// then remote. Returns null if nothing fits.
+// then remote. Freighters go to the stands nearest the cargo terminal and general aviation to the
+// smallest remote stand; neither takes a jet-bridge stand. Returns null if nothing fits.
 export function chooseStand(stands, flight, from, to) {
   let best = null;
+  const size = (s) => Object.values(s.fits).filter(Boolean).length; // how many types fit: bigger stand
   for (const s of stands) {
     if (standBlocker(s, flight.type, from, to)) continue;
+    if (flight.service === 'cargo' || flight.service === 'ga') {
+      let score = s.contact ? -200 : 0;
+      if (flight.service === 'cargo') score -= Math.min(s.cargoDist, 3000) / 20; // 1 point per 20 m from the cargo terminal
+      else score += (s.kind === 'remote' ? 40 : 0) - size(s) * 6;
+      if (!best || score > best.score) best = { s, score };
+      continue;
+    }
     let score = 0;
     const wantKind = flight.intl ? 'intl' : 'dom';
     const suits = s.kind === wantKind || s.kind === 'mixed';

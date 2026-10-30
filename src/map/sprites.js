@@ -424,7 +424,8 @@ export function drawAircraft(ctx, a, scale, { alt = 0, selected = false, time = 
     ctx.strokeStyle = 'rgba(70,84,102,0.55)';
     ctx.lineWidth = 0.28;
     ctx.setLineDash([0.42, 0.22]);
-    ctx.stroke(g.windows);
+    // Freighters (777F, converted 737 / A321 / ATR on cargo flights) have no cabin windows.
+    if (!g.f.t.freighter && a.service !== 'cargo') ctx.stroke(g.windows);
     ctx.setLineDash([]);
     ctx.strokeStyle = 'rgba(95,104,115,0.2)';
     ctx.lineWidth = 0.07;

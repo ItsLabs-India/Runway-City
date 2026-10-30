@@ -7,7 +7,7 @@
 // shows an official logo instead whenever you drop one in public/data/logos/ (see README).
 //
 //   group      who owns / operates it          alliance   Star Alliance, Oneworld, SkyTeam or null
-//   kind       lcc | full | regional           region     home region, for grouping
+//   kind       lcc | full | regional | cargo | ga   region home region, for grouping
 //   icao       callsign prefix of the real airline (used to recognise Live Watch aircraft)
 //   primary    main brand colour (tail)        secondary  accent colour (stripe, badge text)
 //   livery     fin / stripe / engine / tips: colours of each part of the aircraft; fin2 adds a second
@@ -41,6 +41,12 @@ export const BRANDS = Object.fromEntries([
 
   B('LH', 'Lufthansa', 'Lufthansa', 'DLH', 'Lufthansa Group', 'Star Alliance', 'full', 'Europe', '#05164d', '#ffad00', { fin: '#05164d', stripe: '#05164d', engine: '#05164d', tips: '#ffad00' }),
   B('BA', 'British Airways', 'British Airways', 'BAW', 'IAG (International Airlines Group)', 'Oneworld', 'full', 'Europe', '#0b3a7e', '#ce1126', { fin: '#0b3a7e', fin2: '#ce1126', stripe: '#0b3a7e', engine: '#0b3a7e', tips: '#ce1126' }),
+
+  // Cargo-only operators and general aviation (passenger airlines' freighters use their own brand).
+  B('BZ', 'Blue Dart Aviation', 'Blue Dart', 'BDA', 'Blue Dart (DHL Group)', null, 'cargo', 'India', '#2b2f8f', '#f4c300', { fin: '#2b2f8f', stripe: '#f4c300', engine: '#2b2f8f', tips: '#f4c300' }),
+  B('QO', 'Quikjet Cargo', 'Quikjet', 'FQA', 'Quikjet Airlines', null, 'cargo', 'India', '#0e5aa7', '#f7a823', { fin: '#0e5aa7', stripe: '#0e5aa7', tips: '#f7a823' }),
+  B('TK', 'Turkish Airlines', 'Turkish', 'THY', 'Turkish Airlines Group', 'Star Alliance', 'full', 'Europe', '#c8102e', '#ffffff', { fin: '#c8102e', stripe: '#c8102e', engine: '#c8102e', tips: '#c8102e' }),
+  B('GA', 'General aviation', 'Private', 'GA_', 'Private and charter operators', null, 'ga', 'India', '#4a5a6a', '#ffffff', { fin: '#4a5a6a', stripe: '#8796a5', engine: '#4a5a6a', tips: '#8796a5', rear: false }),
 ].map(([k, v]) => [k, v]));
 
 // Airlines that are not in the table (for example from an imported timetable) get a neutral livery.
@@ -51,7 +57,7 @@ const FALLBACK = (code) => ({
 
 export const brandOf = (code) => BRANDS[code] ?? FALLBACK(code);
 
-export const KIND_LABEL = { lcc: 'Low-cost', full: 'Full-service', regional: 'Regional' };
+export const KIND_LABEL = { lcc: 'Low-cost', full: 'Full-service', regional: 'Regional', cargo: 'Cargo', ga: 'General aviation' };
 export const ALLIANCES = ['Star Alliance', 'Oneworld', 'SkyTeam'];
 
 // Airline from a real callsign such as "IGO6E123" or "UAE544" (Live Watch aircraft).

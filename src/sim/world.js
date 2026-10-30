@@ -3,7 +3,7 @@
 import { AIRCRAFT_TYPES, GENERIC_TAILS } from './aircraftTypes.js';
 import { buildSchedule } from './schedule.js';
 import { TaxiGraph } from './taxiGraph.js';
-import { buildStands, parkedPose, standBlocker, chooseStand, book, unbook } from './stands.js';
+import { buildStands, parkedPose, standBlocker, chooseStand, book, unbook, outlinePoints, segmentDistance, TAXI_CLEAR_M } from './stands.js';
 import { servicePositions, routeAround, dims, aircraftFootprint, partsOverlap } from './footprint.js';
 import { SCENARIOS, RANDOM_EVENTS } from './scenarios.js';
 import { runwayFrames, orientStands } from '../map/props.js';
@@ -30,8 +30,10 @@ const PUSH_SPEED = 1.4;
 const LAT_ACCEL = 1.0; // m/s² sideways in taxi turns: v ≤ sqrt(LAT_ACCEL · R)
 const VEHICLE_SPEED = 7;
 const MAX_HOLDING_S = 40 * 60;
-const SEP = { MM: 90, MH: 90, HM: 135, HH: 105 }; // seconds, leader + follower wake
-const DEP_SEP = { M: 60, H: 120 };
+// Seconds between arrivals, leader + follower wake (L light: general aviation; a light aircraft behind a
+// heavy needs the most room, anything behind a light aircraft the least).
+const SEP = { MM: 90, MH: 90, HM: 135, HH: 105, ML: 120, HL: 180, LL: 75, LM: 75, LH: 75 };
+const DEP_SEP = { L: 60, M: 60, H: 120 };
 
 export const DEFAULT_TRAFFIC_BOOST = 0.5; // "Traffic" option on a normal day: +50 % by default, up to +100 %
 export const TRAFFIC_LEVELS = [0, 0.5]; // +100 % (1) works in the schedule but can still freeze the runway at line-up: not offered yet
@@ -52,10 +54,15 @@ export const CREW = { label: 'Ramp crews (6 people)', hireCost: 3e5, dayCost: 60
 const VEHICLE_DAY_COST = 1500;
 const FIXED_OPEX_PER_DAY = 1.2e7; // terminal operations, utilities, maintenance, security support
 const UDF = { dom: 410, intl: 625 };
+const CARGO_PER_T = 5000; // ₹ per tonne handled at the cargo terminal (in + out)
+const GA_HANDLING = 30000; // ₹ per general-aviation visit (handling, lounge, security)
 const LANDING_PER_T = { dom: 320, intl: 640 };
 const PARKING_PER_T_H = 12;
 
 const VISIBLE = new Set(['final', 'goAround', 'landing', 'taxiIn', 'atStand', 'pushback', 'turning', 'taxiOut', 'holdShort', 'lineUp', 'takeoff']);
+const WINGTIP_MARGIN_M = 5; // a taxiing wingtip keeps this far from a parked aircraft or its vehicles
+const WING_PENALTY = 2e4; // route cost of passing too close to an occupied stand (only used when there is no other way)
+const OCCUPYING = new Set(['atStand', 'taxiIn', 'landing']); // flights that are (or are about to be) on their stand
 const DEPARTURE_QUEUE = new Set(['pushback', 'turning', 'taxiOut', 'holdShort', 'lineUp']);
 const MAX_DEPARTURE_QUEUE = 9; // aircraft between push-back and take-off before the gate holds the next one
 const GROUND = new Set(['taxiIn', 'taxiOut', 'pushback', 'turning', 'holdShort', 'lineUp']);
@@ -104,7 +111,9 @@ export class World {
       s.leadIn = len;
     }
     for (let i = oriented.length - 1; i >= 0; i--) if (oriented[i].t3 && !this.graph.standNode.has(oriented[i].id)) oriented.splice(i, 1);
-    this.stands = buildStands(oriented, map);
+    this.taxiLines = this.graph.edges.filter((e) => e.kind === 'taxi').map((e) => [[this.graph.nodes[e.a].x, this.graph.nodes[e.a].y], [this.graph.nodes[e.b].x, this.graph.nodes[e.b].y]]);
+    this.stands = buildStands(oriented, map, this.taxiLines);
+    this.wingReach = this.#wingReach();
     for (const s of this.stands) {
       if (s.t3) {
         s.closed = true; // built, but closed and invisible until the Terminal 3 project completes
@@ -112,6 +121,7 @@ export class World {
       }
     }
     this.graph.buildCorridors();
+    this.#pushBlocks();
     this.standById = new Map(this.stands.map((s) => [s.id, s]));
     this.bridges = buildJetBridges(map, this.stands);
 
@@ -535,7 +545,7 @@ export class World {
         const prev = this.#runwayNeighbour(ex.node, -1);
         if (prev === null) continue;
         // Arriving along the runway: the route may only turn off at an angle the aircraft can make.
-        const path = this.graph.findPath(ex.node, link.node, { ...this.#routeOptions(), prev });
+        const path = this.graph.findPath(ex.node, link.node, { ...this.#routeOptions(f), prev });
         if (!path || path.length < 2) continue;
         // Only exits angled with the landing direction: a turn-off sharper than ~100° (an exit
         // built for the opposite direction) is not something an airliner can make.
@@ -766,7 +776,7 @@ export class World {
               j.cleared = true;
               f.admitted = true;
               this.kpi.conflictsIgnored++;
-              (this.overrides ??= []).push({ t: this.t, kind: 'junction', a: f.id, b: opposing.id, wa: f.waiting, wb: opposing.waiting });
+              (this.overrides ??= []).push({ t: this.t, kind: 'junction', x: f.x, y: f.y, a: f.id, b: opposing.id, wa: f.waiting, wb: opposing.waiting });
             }
           }
         } else {
@@ -795,7 +805,7 @@ export class World {
           f.ghostUntil = this.t + 30;
           f.blockedFor = 0;
           this.kpi.conflictsIgnored++;
-          (this.overrides ??= []).push({ t: this.t, kind: 'blocker', a: f.id, b: f.blockedBy, wa: f.waiting, wb: this.flights.find((x) => x.id === f.blockedBy)?.waiting });
+          (this.overrides ??= []).push({ t: this.t, kind: 'blocker', x: f.x, y: f.y, a: f.id, b: f.blockedBy, wa: f.waiting, wb: this.flights.find((x) => x.id === f.blockedBy)?.waiting });
         }
       } else {
         f.blockedBy = null;
@@ -847,17 +857,61 @@ export class World {
 
   // Traffic-flow planning: every taxi route is registered with its direction of travel, and new
   // routes pay a heavy penalty for using a taxiway against existing traffic (no head-on meetings).
-  #routeOptions() {
+  // f (optional): the flight being routed. A wide-body also avoids taxi lines that pass an occupied
+  // stand closer than its half span + margin (narrow-bodies always clear: stands keep TAXI_CLEAR_M).
+  #routeOptions(f = null) {
+    const reach = f ? AIRCRAFT_TYPES[f.type].span / 2 + WINGTIP_MARGIN_M : 0;
+    let occupied = null;
+    if (reach > TAXI_CLEAR_M) {
+      occupied = new Map();
+      for (const x of this.flights) if (x !== f && x.standId !== null && OCCUPYING.has(x.phase)) occupied.set(x.standId, x.type);
+    }
     return {
       runwayCost: (e) => (e.ref === '07/25' ? 1e5 : 300),
       extraCost: (e, from) => {
+        let cost = 0;
+        if (occupied) {
+          for (const n of this.wingReach.get(e.id) ?? []) {
+            if (n.clear < reach && occupied.get(n.standId) === n.type && n.standId !== f.standId) {
+              cost += WING_PENALTY;
+              break;
+            }
+          }
+        }
         const use = this.edgeUse.get(e.id);
-        if (!use || use.size === 0) return 0;
+        if (!use || use.size === 0) return cost;
         const dir = e.a === from ? 1 : -1;
-        for (const d of use.values()) if (d !== dir) return 5000;
-        return 0;
+        for (const d of use.values()) if (d !== dir) return cost + 5000;
+        return cost;
       },
     };
+  }
+
+  // For every taxi line: the stands (and parked types) closer to it than the widest wingspan could
+  // need, with the distance from the line to that aircraft and its turnaround vehicles.
+  #wingReach() {
+    const widest = Math.max(...Object.values(AIRCRAFT_TYPES).map((t) => t.span)) / 2 + WINGTIP_MARGIN_M;
+    const out = new Map();
+    const taxi = this.graph.edges.filter((e) => e.kind === 'taxi');
+    for (const s of this.stands) {
+      if (!s.usable) continue;
+      for (const [type, ok] of Object.entries(s.fits)) {
+        if (!ok) continue;
+        const pts = [...s.footprints[type], ...s.service[type]].flatMap((p) => outlinePoints(p, 2));
+        for (const e of taxi) {
+          const a = this.graph.nodes[e.a];
+          const b = this.graph.nodes[e.b];
+          if (Math.min(Math.hypot(a.x - s.x, a.y - s.y), Math.hypot(b.x - s.x, b.y - s.y)) > e.len + 150) continue;
+          let clear = Infinity;
+          for (const p of pts) clear = Math.min(clear, segmentDistance(p, [a.x, a.y], [b.x, b.y]));
+          if (clear < widest) {
+            if (!out.has(e.id)) out.set(e.id, []);
+            out.get(e.id).push({ standId: s.id, type, clear });
+          }
+        }
+      }
+    }
+    return out;
   }
 
   #registerRoute(f, nodeIds) {
@@ -1018,7 +1072,7 @@ export class World {
     if (k < 1) return false;
     const avoid = new Set(other.routeEdges ?? []);
     if (junction) for (const e of this.graph.edges) if (e.corr === junction.corr) avoid.add(e.id);
-    const base = this.#routeOptions();
+    const base = this.#routeOptions(f);
     const options = { ...base, prev: ids[k - 1], extraCost: (e, from) => (avoid.has(e.id) ? 1e5 : base.extraCost(e, from)) };
     const dest = f.phase === 'taxiIn' ? this.graph.standNode.get(f.standId).node : this.#runwayNeighbour(this.depEntry.node, 1);
     const path = dest === null ? null : this.graph.findPath(ids[k], dest, options);
@@ -1110,6 +1164,8 @@ export class World {
     const type = AIRCRAFT_TYPES[f.type];
     const k = type.seats / 186;
     const wide = type.code === 'E';
+    if (f.service === 'cargo') return this.#cargoPlan(f, wide);
+    if (f.service === 'ga') return this.#gaPlan(f);
     const remote = !stand.contact || !this.bridges.some((b) => b.standId === stand.id); // no bridge reaches: stairs and buses
     const min = 60;
     return [
@@ -1125,6 +1181,34 @@ export class World {
       { id: 'board', label: 'Boarding', after: ['clean', 'cater', 'fuel'], dur: f.paxOut * 3, spots: remote ? ['bus'] : [], board: true },
       { id: 'load', label: 'Load bags', after: ['unload'], dur: (8 + 6 * k) * min, spots: ['beltAft', 'tugAft'], lead: 14 * min },
       { id: 'close', label: 'Doors closed', after: ['board', 'load', 'power', 'connect', ...(wide || f.id % 3 === 0 ? ['water'] : [])], dur: 2 * min, spots: [] },
+    ];
+  }
+
+  // Freighter: no passengers, bridges, catering or cleaning. Pallets and containers come off, the
+  // aircraft is fuelled, the outbound load goes on near departure. Times grow with the tonnage. The
+  // cargo terminal's own handlers do the work (no ramp crew from the pool); loaders, tugs, fuel and
+  // ground power still come from the shared fleet.
+  #cargoPlan(f, wide) {
+    const min = 60;
+    return [
+      { id: 'chocks', label: 'Chocks and cones', after: [], dur: 1 * min, spots: [] },
+      { id: 'power', label: 'Ground power', after: ['chocks'], dur: 0.5 * min, spots: ['gpu'], keepUntil: 'close' },
+      { id: 'unload', label: 'Unload cargo', after: ['chocks'], dur: (10 + 0.45 * (f.cargoIn ?? 0)) * min, spots: ['beltAft', 'tugAft'], keepUntil: 'load' },
+      { id: 'fuel', label: 'Refuelling', after: ['chocks'], dur: (wide ? 28 : 14) * min, spots: ['fuel'] },
+      { id: 'load', label: 'Load cargo', after: ['unload'], dur: (10 + 0.45 * (f.cargoOut ?? 0)) * min, spots: ['beltAft', 'tugAft'], lead: 15 * min },
+      { id: 'close', label: 'Doors closed', after: ['load', 'fuel', 'power'], dur: 2 * min, spots: [] },
+    ];
+  }
+
+  // General aviation: the operator's own handling agent looks after it (no ramp crew from the pool);
+  // passengers walk to the GA lounge; fuel before the next flight.
+  #gaPlan(f) {
+    const min = 60;
+    return [
+      { id: 'chocks', label: 'Chocks', after: [], dur: 1 * min, spots: [] },
+      { id: 'handling', label: 'Passengers and bags (GA lounge)', after: ['chocks'], dur: 6 * min, spots: [] },
+      { id: 'fuel', label: 'Refuelling', after: ['chocks'], dur: (AIRCRAFT_TYPES[f.type].mtow > 15 ? 12 : 7) * min, spots: ['fuel'], lead: 20 * min },
+      { id: 'close', label: 'Doors closed', after: ['handling', 'fuel'], dur: 1 * min, spots: [] },
     ];
   }
 
@@ -1147,7 +1231,7 @@ export class World {
     // A late aircraft keeps its stand (and its neighbours' wingtip space) booked until it leaves.
     const booking = this.standById.get(f.standId).bookings.find((b) => b.flightId === f.id);
     if (booking && booking.to < this.t + 600) booking.to = this.t + 600;
-    if (!f.crew) {
+    if (!f.crew && !f.service) { // freighters are worked by the cargo terminal, general aviation by its own agent
       if (this.crews.busy < this.crews.total) {
         this.crews.busy++;
         f.crew = true;
@@ -1447,11 +1531,39 @@ export class World {
     // Plan the route out before pushing: lead-in back to the taxilane, then to the runway.
     const link = this.graph.standNode.get(f.standId);
     const entry = this.graph.nodes[link.entry];
-    const path = this.#departureRoute(link.entry, link.node);
+    let path = this.#departureRoute(link.entry, link.node, f);
     if (!path) {
       f.waiting = 'No taxi route to the runway';
       return;
     }
+    // Push-back direction: the tail swings away from where we will taxi. If that swing would pass over
+    // the aircraft on the next stand, push the other way (and taxi out that way); if both clash, wait
+    // for the neighbour (at most ten minutes, then a counted override).
+    const pushStats = (this.pushStats ??= { clear: 0, flipped: 0, held: 0, forced: 0 });
+    if (f.pushForced) {
+      // already waited the full ten minutes: go as planned
+    } else if (this.#pushSweepClear(f, link, path)) {
+      if (!f.pushCounted) pushStats.clear++;
+    } else {
+      const other = path.length > 1 ? this.#departureRoute(link.entry, path[1], f) : null;
+      if (other && other[1] !== path[1] && this.#pushSweepClear(f, link, other)) {
+        path = other;
+        if (!f.pushCounted) pushStats.flipped++;
+      } else {
+        if (f.pushHeldSince === undefined) {
+          f.pushHeldSince = this.t;
+          pushStats.held++;
+        }
+        if (this.t - f.pushHeldSince < 600) {
+          f.waiting = 'Waiting: the push-back would swing over the next stand';
+          f.delayCause ??= 'Push-back blocked by the next stand';
+          return;
+        }
+        f.pushForced = true;
+        pushStats.forced++;
+      }
+    }
+    f.pushCounted = true;
     // Push-back clearance: nobody taxiing close to our taxilane entry.
     // ...and nobody whose next 500 m of route passes our taxilane (as ground control would hold a
     // push-back for an arrival that is about to come down that lane).
@@ -1507,6 +1619,92 @@ export class World {
 
   // Push-back path: tail-first back along the lead-in, round the painted lead-in curve onto the
   // taxilane on the side away from where we will taxi, until both gears are on the taxilane.
+  // Stand pairs where an aircraft cannot push back past one parked on the next stand, whichever way its
+  // tail swings: stand.pushBlocksOf(type) = Set of "neighbourStandId:neighbourType", worked out the first
+  // time it is asked and cached. standBlocker keeps such pairs from being booked at the same time (as a
+  // stand planner would).
+  #pushBlocks() {
+    const g = this.graph;
+    const boxOf = (polys) => {
+      const b = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      for (const poly of polys) for (const [x, y] of poly) {
+        b.minX = Math.min(b.minX, x); b.maxX = Math.max(b.maxX, x);
+        b.minY = Math.min(b.minY, y); b.maxY = Math.max(b.maxY, y);
+      }
+      return b;
+    };
+    const touch = (a, b) => a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
+    const none = new Set();
+    for (const st of this.stands) {
+      const cache = new Map();
+      st.pushBlocksOf = (type) => {
+        if (!cache.has(type)) cache.set(type, compute(st, type));
+        return cache.get(type);
+      };
+      // Can a `type` reach (or leave) this stand while a `nType` is parked on stand `nId`? A wide-body
+      // has to use one of the taxi lines at its lead-in; if every one of them passes the neighbour
+      // closer than its half span + margin, the wing would sweep over it.
+      const link = g.standNode.get(st.id);
+      const entryEdges = link ? g.nodes[link.entry].edges.filter((id) => g.edges[id].kind === 'taxi') : [];
+      st.accessBlocked = (type, nId, nType) => {
+        const reach = AIRCRAFT_TYPES[type].span / 2 + WINGTIP_MARGIN_M;
+        if (reach <= TAXI_CLEAR_M || !entryEdges.length) return false;
+        return entryEdges.every((id) => (this.wingReach.get(id) ?? []).some((x) => x.standId === nId && x.type === nType && x.clear < reach));
+      };
+    }
+    const compute = (st, type) => {
+      const link = g.standNode.get(st.id);
+      if (!st.usable || !link || !st.fits[type]) return none;
+      const E = link.entry;
+      const outs = g.nodes[E].edges.map((id) => g.edges[id]).filter((e) => e.kind === 'taxi').map((e) => (e.a === E ? e.b : e.a));
+      const near = st.neighbours.filter((n) => n.usable && Math.hypot(n.x - st.x, n.y - st.y) < 130);
+      if (!near.length || !outs.length) return none;
+      const t = AIRCRAFT_TYPES[type];
+      const pose = parkedPose(st, type);
+      const sweeps = [];
+      for (const n1 of outs) {
+        const probe = { x: pose.x, y: pose.y, heading: pose.heading, gN: t.length * t.noseGear, wb: t.wheelbase, type };
+        this.#planPushback(probe, link, [E, n1]);
+        if (probe.pushFallback) continue; // no curve this way (straight back): not a swing
+        const prints = [];
+        for (let d = probe.s; d <= probe.limit; d += 3) {
+          probe.s = d;
+          this.#placeOnPath(probe, true);
+          prints.push(aircraftFootprint(type, probe.x, probe.y, probe.heading));
+        }
+        sweeps.push({ prints, box: boxOf(prints.flat()) });
+      }
+      if (!sweeps.length) return none;
+      const blocked = new Set();
+      for (const n of near) {
+        for (const [u, ok2] of Object.entries(n.fits)) {
+          if (!ok2) continue;
+          const fp = n.footprints[u];
+          const fb = boxOf(fp);
+          if (sweeps.every((sw) => touch(sw.box, fb) && sw.prints.some((p) => partsOverlap(p, fp)))) blocked.add(`${n.id}:${u}`);
+        }
+      }
+      return blocked.size ? blocked : none;
+    };
+  }
+
+  // Does the push-back along `route` swing any part of the aircraft over an aircraft parked nearby?
+  // (Planned on a scratch copy: the flight itself is not touched.)
+  #pushSweepClear(f, link, route) {
+    const parked = this.flights.filter((g) => g !== f && g.phase === 'atStand' && Math.hypot(g.x - f.x, g.y - f.y) < 250);
+    if (!parked.length) return true;
+    const probe = { x: f.x, y: f.y, heading: f.heading, gN: f.gN, wb: f.wb, type: f.type };
+    this.#planPushback(probe, link, route);
+    const prints = parked.map((g) => aircraftFootprint(g.type, g.x, g.y, g.heading));
+    for (let d = probe.s; d <= probe.limit; d += 2) {
+      probe.s = d;
+      this.#placeOnPath(probe, true);
+      const mine = aircraftFootprint(f.type, probe.x, probe.y, probe.heading);
+      if (prints.some((p) => partsOverlap(mine, p))) return false;
+    }
+    return true;
+  }
+
   #planPushback(f, link, route) {
     const g = this.graph;
     const E = link.entry;
@@ -1711,7 +1909,9 @@ export class World {
     this.kpi.depDelaySum += delay;
     if (delay <= 15 * 60) this.kpi.onTime++;
     this.#satisfaction(delay <= 15 * 60 ? 0.12 : -Math.min(4, delay / 600));
-    this.#earn((f.pax?.board ?? f.paxOut) * UDF[f.intl ? 'intl' : 'dom'] * TARIFFS[this.tariff].mult, 'udf', { airline: f.airline });
+    if (f.paxOut) this.#earn((f.pax?.board ?? f.paxOut) * UDF[f.intl ? 'intl' : 'dom'] * TARIFFS[this.tariff].mult, 'udf', { airline: f.airline });
+    if (f.service === 'cargo') this.#earn(((f.cargoIn ?? 0) + (f.cargoOut ?? 0)) * CARGO_PER_T * TARIFFS[this.tariff].mult, 'cargo', { airline: f.airline });
+    if (f.service === 'ga') this.#earn(GA_HANDLING * TARIFFS[this.tariff].mult, 'ga', { airline: f.airline });
     f.depDelay = delay;
     this.#airStat(f.airline, { dep: 1, onTime: delay <= 15 * 60 ? 1 : 0, delay, pax: (f.pax?.board ?? f.paxOut) + f.paxIn });
     if (delay > 900 && f.delayCause) this.dayCauses[f.delayCause] = (this.dayCauses[f.delayCause] ?? 0) + 1;
@@ -1988,20 +2188,20 @@ export class World {
 
   // Route from `from` (facing away from `prev`) to the departure entry, checked all the way onto
   // the runway: the search goes one runway node further so the line-up turn is a legal one too.
-  #departureRoute(from, prev) {
+  #departureRoute(from, prev, f = null) {
     const r1 = this.#runwayNeighbour(this.depEntry.node, 1);
     if (r1 !== null) {
-      const path = this.graph.findPath(from, r1, { ...this.#routeOptions(), prev });
+      const path = this.graph.findPath(from, r1, { ...this.#routeOptions(f), prev });
       if (path && path.at(-2) === this.depEntry.node) return path.slice(0, -1);
     }
-    return this.graph.findPath(from, this.depEntry.node, { ...this.#routeOptions(), prev });
+    return this.graph.findPath(from, this.depEntry.node, { ...this.#routeOptions(f), prev });
   }
 
   // After a runway direction change: re-route from where the aircraft is, along the lines.
   #replanDeparture(f) {
     const nose = [f.x + Math.cos(f.heading) * f.gN, f.y + Math.sin(f.heading) * f.gN];
     const start = this.graph.nearestNode(nose[0], nose[1], (n) => n.edges.some((id) => this.graph.edges[id].kind === 'taxi'));
-    const path = this.#departureRoute(start.id, null);
+    const path = this.#departureRoute(start.id, null, f);
     if (!path) return;
     this.#registerRoute(f, path);
     f.depRoute = path;
@@ -2427,7 +2627,7 @@ export class World {
       const stand = this.standById.get(st.id);
       if (!stand) continue;
       stand.locked = st.locked ?? null;
-      stand.closed = st.closed;
+      stand.closed = st.closed || !stand.usable; // saves from before the stand-fit rule: unusable stays closed
       stand.occupant = st.occupant;
       stand.bookings = st.bookings;
       stand.contact = st.contact;

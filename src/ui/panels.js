@@ -53,7 +53,7 @@ function boardPanel(w, ui) {
     const stand = f.standId !== null ? w.standById.get(f.standId)?.ref : '–';
     return `<tr data-row="${f.id}" class="${f.phase}" tabindex="0">
       <td>${hhmm(sched)}${late ? ` <i>${hhmm(est)}</i>` : ''}</td>
-      <td class="fl">${badge(f.airline, 'sm')} <b>${esc(arr ? f.arrNo : f.depNo)}</b></td>
+      <td class="fl">${badge(f.airline, 'sm')} <b>${esc(arr ? f.arrNo : f.depNo)}</b>${f.service ? ` <small class="svc ${f.service}">${f.service === 'cargo' ? 'Cargo' : 'GA'}</small>` : ''}</td>
       <td>${esc(cityName(arr ? f.from : f.to))}</td>
       <td>${f.type}</td><td>${esc(stand ?? '–')}</td>
       <td class="st">${esc(statusText(f, arr))}</td></tr>`;
@@ -269,7 +269,7 @@ function flightPanel(w, id, ui) {
   return `
     <button class="x" data-close aria-label="Close">×</button>
     <h2 class="fh">${badge(f.airline, 'lg')} ${esc(f.arrNo)} / ${esc(f.depNo)}</h2>
-    <p class="sub"><b>${esc(nameOf(f))}</b> · ${esc(f.intl ? 'international' : 'domestic')}</p>
+    <p class="sub"><b>${esc(nameOf(f))}</b> · ${esc(f.intl ? 'international' : 'domestic')}${f.service === 'cargo' ? ' · cargo' : f.service === 'ga' ? ' · general aviation' : ''}</p>
     <p class="muted">${airlineLine(f.airline)}</p>
     ${flightDetails(w, f, ui)}
     <div class="row-actions">

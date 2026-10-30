@@ -5,6 +5,8 @@ export const INCOME = {
   landing: 'Landing fees',
   parking: 'Parking fees',
   udf: 'Passenger fees (UDF)',
+  cargo: 'Cargo handling',
+  ga: 'General aviation handling',
   retail: 'Retail concessions',
   sales: 'Equipment sales',
   other: 'Other income',

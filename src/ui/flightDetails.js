@@ -35,8 +35,11 @@ function steps(w, f) {
     { key: 'final', label: 'On final approach', plan: null, actual: tm.final ?? null, est: arrEst - 150 },
     { key: 'landed', label: 'Landed', plan: f.sta - 300, actual: tm.landed ?? null, est: arrEst },
     { key: 'onBlock', label: 'On block at the stand', plan: f.sta, actual: f.onBlock ?? null, est: arrEst + 300 },
-    { key: 'deboard', label: 'Passengers off', plan: null, actual: task('deboard')?.doneAt ?? null, est: null },
-    { key: 'board', label: 'Boarding starts', plan: null, actual: tm.board ?? null, est: null },
+    ...(f.service === 'cargo'
+      ? [{ key: 'unload', label: 'Cargo unloaded', plan: null, actual: task('unload')?.doneAt ?? null, est: null }, { key: 'load', label: 'Cargo loaded', plan: null, actual: task('load')?.doneAt ?? null, est: null }]
+      : f.service === 'ga'
+        ? [{ key: 'handling', label: 'Passengers to the GA lounge', plan: null, actual: task('handling')?.doneAt ?? null, est: null }]
+        : [{ key: 'deboard', label: 'Passengers off', plan: null, actual: task('deboard')?.doneAt ?? null, est: null }, { key: 'board', label: 'Boarding starts', plan: null, actual: tm.board ?? null, est: null }]),
     { key: 'close', label: 'Doors closed', plan: null, actual: task('close')?.doneAt ?? null, est: null },
     { key: 'offBlock', label: 'Pushed back (off block)', plan: f.std, actual: f.offBlock ?? null, est: Math.max(f.std, w.t) },
     { key: 'airborne', label: 'Airborne', plan: f.std + 12 * 60, actual: tm.airborne ?? null, est: Math.max(f.std, w.t) + 12 * 60 },
@@ -99,6 +102,15 @@ function groundLines(w, f, stand) {
 
 function passengers(w, f) {
   const t = AIRCRAFT_TYPES[f.type];
+  if (f.service === 'cargo') {
+    const cap = t.freightT ?? 0;
+    return `<div class="kpis fd-grid"><span>Cargo in <b>${f.cargoIn ?? 0} t</b></span><span>Cargo out <b>${f.cargoOut ?? 0} t</b></span><span>Max payload <b>${cap} t</b></span><span>Load factor <b>${cap ? Math.round(((f.cargoOut ?? 0) / cap) * 100) : 0} %</b></span></div>
+      <p class="muted fine">Freighter: no passengers. Handled at the cargo terminal (₹ per tonne in and out).</p>`;
+  }
+  if (f.service === 'ga') {
+    return `<div class="kpis fd-grid"><span>On board in <b>${f.aboardIn ?? 0}</b></span><span>On board out <b>${f.aboardOut ?? 0}</b></span><span>Seats <b>${t.seats}</b></span><span>Handled at <b>GA lounge</b></span></div>
+      <p class="muted fine">Private / charter flight: passengers skip the terminals, the operator's own agent handles it.</p>`;
+  }
   const p = f.pax;
   const lf = Math.round((f.paxOut / t.seats) * 100);
   let bar = '';
@@ -174,12 +186,12 @@ export function flightDetails(w, f, ui = null) {
     ${next ? `<small>Next: ${esc(next.label.toLowerCase())}${next.est ? ` about ${hhmm(next.est)}` : ''}</small>` : ''}</div>
     ${f.waiting ? `<p class="warn">⏳ ${esc(f.waiting)}</p>` : ''}`;
 
-  const route = `${leg(f.arrNo, f.from, 'MAA', t.props)}${leg(f.depNo, 'MAA', f.to, t.props)}<p class="muted fine">${f.intl ? 'International' : 'Domestic'} rotation · ${AIRCRAFT_TYPES[f.type].turnMin} min scheduled turnaround</p>`;
-  const aircraft = `<div class="kpis fd-grid"><span>Type <b>${esc(t.name)}</b></span><span>Registration <b title="Made up for the simulation">${esc(registration(f.airline, f.id))}</b></span>
-    <span>Engines <b>${t.engines}× ${esc(t.engineModel)}</b></span><span>Wake <b>${t.wake === 'H' ? 'Heavy' : 'Medium'}</b></span>
+  const route = `${leg(f.arrNo, f.from, 'MAA', t.props)}${leg(f.depNo, 'MAA', f.to, t.props)}<p class="muted fine">${f.intl ? 'International' : 'Domestic'} ${f.service === 'cargo' ? 'cargo' : f.service === 'ga' ? 'general-aviation' : ''} rotation · ${AIRCRAFT_TYPES[f.type].turnMin} min scheduled turnaround</p>`;
+  const aircraft = `<div class="kpis fd-grid"><span>Type <b>${esc(t.name)}</b></span><span>Registration <b title="Made up for the simulation">${esc(f.registration ?? registration(f.airline, f.id))}</b></span>
+    <span>Engines <b>${t.engines}× ${esc(t.engineModel)}</b></span><span>Wake <b>${t.wake === 'H' ? 'Heavy' : t.wake === 'L' ? 'Light' : 'Medium'}</b></span>
     <span>Size <b>${t.length} × ${t.span} m</b></span><span>Max weight <b>${t.mtow} t</b></span></div>`;
-  const ground = `<div class="kpis fd-grid"><span>Stand <b>${stand ? esc(stand.ref) : '–'}</b></span><span>Boarding <b>${stand ? (stand.contact ? 'jet bridge' : 'bus, remote') : '–'}</b></span>
-    <span>Terminal <b>${esc(term?.name ?? '–')}</b></span><span>Stand size <b>${t.code === 'E' ? 'wide-body' : 'narrow-body'}</b></span></div>${groundLines(w, f, stand)}${turnaround(w, f)}`;
+  const ground = `<div class="kpis fd-grid"><span>Stand <b>${stand ? esc(stand.ref) : '–'}</b></span><span>${f.service === 'cargo' ? 'Cargo' : 'Boarding'} <b>${!stand ? '–' : f.service === 'cargo' ? 'pallets by loader' : f.service === 'ga' ? 'walk / car' : stand.contact ? 'jet bridge' : 'bus, remote'}</b></span>
+    <span>Terminal <b>${esc(f.service === 'cargo' ? 'Cargo Terminal' : f.service === 'ga' ? 'GA lounge' : term?.name ?? '–')}</b></span><span>Stand size <b>${t.code === 'E' ? 'wide-body' : t.code === 'B' ? 'business / light' : 'narrow-body'}</b></span></div>${groundLines(w, f, stand)}${turnaround(w, f)}`;
 
   const sec = (title, body) => `<section class="fd-sec"><h4>${title}</h4>${body}</section>`;
   return [

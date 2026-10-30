@@ -552,3 +552,8 @@ button:focus-visible, [data-row]:focus-visible { outline: 2px solid var(--accent
   .fcards { grid-template-columns: repeat(2, 1fr); }
   .ph { top: 0; }
 }
+
+/* Cargo and general-aviation tags on the flight board */
+.fids .svc { font-size: 10px; font-weight: 600; padding: 0 4px; border-radius: 3px; margin-left: 4px; vertical-align: 1px; }
+.fids .svc.cargo { background: #8a5a12; color: #fff3dc; }
+.fids .svc.ga { background: #2d5f73; color: #e3f4fb; }

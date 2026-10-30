@@ -133,7 +133,7 @@ check('clicking Terminal 1 on the map opens the Terminals panel', await W(() => 
 await page.keyboard.press('f');
 await W(() => window.__runway.world.update(1200));
 await settle(500);
-const rowId = await W(() => window.__runway.world.flights.find((f) => f.phase === 'atStand')?.id);
+const rowId = await W(() => window.__runway.world.flights.find((f) => f.phase === 'atStand' && !f.service)?.id); // a passenger flight
 await page.click(`[data-row="${rowId}"]`);
 await settle();
 check('board row selects the flight', (await W(() => document.querySelector('[data-info]').innerText)).toLowerCase().includes('passengers'));
