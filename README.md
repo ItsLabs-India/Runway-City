@@ -72,3 +72,24 @@ Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright
 ## Plan
 
 See `CLAUDE.md` for the stack, rules and roadmap.
+
+## Windows app (.exe)
+
+The game also ships as a Windows desktop app (Electron). The exe serves the game itself and answers
+`/api/*` in-process, so real weather and Live Watch work without a server. Saves stay on the PC.
+
+```bash
+npm run app    # build and open the game in a desktop window
+npm run dist   # build release/RunwayCity-<version>-setup.exe (installer) and -portable.exe
+```
+
+**Release on GitHub:** bump the version and push the tag; the `Release Windows app` workflow builds
+both exes, smoke-tests the packaged app and attaches them to a GitHub Release.
+
+```bash
+npm version patch        # 0.1.0 -> 0.1.1, commits and tags v0.1.1
+git push --follow-tags
+```
+
+The exe is not code-signed, so Windows SmartScreen shows "Windows protected your PC" the first time:
+click **More info → Run anyway**. A code-signing certificate removes that warning.

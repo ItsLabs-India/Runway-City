@@ -1,0 +1,45 @@
+# Builds the Windows app and publishes it as a GitHub Release when a version tag is pushed:
+#   npm version patch   (or edit "version" in package.json)
+#   git push --follow-tags
+# Tag v1.2.3 must match package.json "version" 1.2.3.
+name: Release Windows app
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build installer and portable exe
+        run: npm run dist
+
+      - name: Smoke test the packaged app
+        shell: bash
+        env:
+          RC_SMOKE: '1'
+        run: '"release/win-unpacked/Runway City.exe" | tee smoke.log; grep -q "RC_SMOKE {\"ok\":true" smoke.log'
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/RunwayCity-*-setup.exe release/RunwayCity-*-portable.exe \
+            --title "Runway City $GITHUB_REF_NAME" --generate-notes \
+          || gh release upload "$GITHUB_REF_NAME" release/RunwayCity-*-setup.exe release/RunwayCity-*-portable.exe --clobber

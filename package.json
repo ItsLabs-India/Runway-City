@@ -23,10 +23,59 @@
     "check:terminals": "node scripts/term-check.mjs",
     "check:sound": "vite build && node scripts/sound-check.mjs",
     "test:ui": "vite build && node scripts/ui-test.mjs",
-    "import:timetable": "node scripts/import-timetable.mjs"
+    "import:timetable": "node scripts/import-timetable.mjs",
+    "app": "vite build && electron .",
+    "dist": "vite build && electron-builder --win --publish never"
   },
   "devDependencies": {
+    "electron": "44.8.0",
+    "electron-builder": "26.17.0",
     "playwright-core": "^1.64.1",
     "vite": "^8.3.5"
+  },
+  "main": "electron/main.mjs",
+  "productName": "Runway City",
+  "author": "ItsLabs India",
+  "build": {
+    "appId": "in.itslabs.runwaycity",
+    "productName": "Runway City",
+    "artifactName": "RunwayCity-${version}-setup.${ext}",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "worker/**",
+      "build/icon.png",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Runway City"
+    },
+    "portable": {
+      "artifactName": "RunwayCity-${version}-portable.${ext}"
+    }
   }
 }
