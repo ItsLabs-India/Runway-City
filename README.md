@@ -2,6 +2,8 @@
 
 A 2D top-down airport management game in the browser, inspired by Chennai's real airport. You run the airport with quick, high-level building and group hiring, on the real layout, with real schedules and live traffic.
 
+**[Play it](https://itslabs-india.github.io/Runway-City/play/)** · [Game page](https://itslabs-india.github.io/Runway-City/)
+
 *Unofficial fan project, not affiliated with the Airports Authority of India or any airline.*
 
 ## Status

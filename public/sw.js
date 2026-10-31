@@ -1,6 +1,6 @@
 // Offline support: the game shell and map data are cached, so the game loads without a network
 // (live weather and traffic simply stay off). Network first, so a new version is picked up at once.
-const CACHE = 'runway-city-v1';
+const CACHE = 'runway-city-v2';
 const SHELL = ['./', './manifest.webmanifest', './icon.svg', './data/maa-map.json'];
 
 self.addEventListener('install', (e) => {

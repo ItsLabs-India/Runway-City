@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:site": "vite build && node scripts/build-site.mjs",
+    "site:shots": "vite build && node scripts/site-shots.mjs",
     "preview": "vite preview",
     "fetch:osm": "node scripts/fetch-osm.mjs",
     "build:map": "node scripts/build-map.mjs",

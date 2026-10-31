@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Runway City: run a busy airport, free in your browser</title>
+    <meta name="description" content="A top-down airport management game inspired by Chennai. Land it, turn it round, get it away on time. Free in your browser, no download. Unofficial fan project." />
+    <meta name="theme-color" content="#10151c" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Runway City" />
+    <meta property="og:description" content="Run a busy airport from the 06:00 shift onwards. Free in your browser." />
+    <meta property="og:url" content="https://itslabs-india.github.io/Runway-City/" />
+    <meta property="og:image" content="https://itslabs-india.github.io/Runway-City/images/night.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <img class="hero-art" src="images/night.jpg" width="1600" height="1000" alt="An airport apron at night: floodlights, lit taxiways and aircraft parked at the terminals." fetchpriority="high" />
+      <div class="hero-text">
+        <h1>Runway City</h1>
+        <p class="tagline">It's 06:00. The first flights are on approach. The airport is yours.</p>
+        <a class="play" href="play/">Play free</a>
+        <p class="note">In your browser, on desktop or phone. No download, no sign-up.</p>
+      </div>
+    </header>
+
+    <main>
+      <p class="intro">A top-down airport management game inspired by Chennai. Keep hundreds of flights moving from dawn to dawn, while the weather, the crowds and your budget all push back.</p>
+
+      <section class="feature">
+        <img src="images/airfield.jpg" width="1600" height="1000" loading="lazy" alt="The whole airfield from above, with two crossing runways, taxiways, aprons and terminals." />
+        <div>
+          <h2>One airfield, modelled on a real one</h2>
+          <p>Two crossing runways, a web of taxiways, busy terminals and the city around them. Choose which runway lands and which departs, and more than 250 aircraft a day will find their way through.</p>
+        </div>
+      </section>
+
+      <section class="feature">
+        <img src="images/turnaround.jpg" width="1600" height="1000" loading="lazy" alt="Close-up of aircraft at their stands with jet bridges docked and baggage carts alongside." />
+        <div>
+          <h2>Every turnaround, in full view</h2>
+          <p>Jet bridges swing out to the door. Bags ride the belt, fuel trucks pull up, caterers and cleaners get to work, and a tug pushes the aircraft back. Run short of crews or vehicles and you'll see the delay start.</p>
+        </div>
+      </section>
+
+      <section class="feature">
+        <img src="images/terminals.jpg" width="1600" height="1000" loading="lazy" alt="The terminals panel beside the map, showing queues, open counters and buttons to add more." />
+        <div>
+          <h2>Build in a click, not a chair at a time</h2>
+          <p>Add check-in counters, security lanes and baggage belts in groups. Plan a whole expansion, then copy the layout to another terminal. Set the shifts, hire in teams, and watch the queues fall. Spend your time running the airport, not decorating it.</p>
+        </div>
+      </section>
+
+      <section class="feature">
+        <img src="images/flight.jpg" width="1600" height="1000" loading="lazy" alt="A flight's card showing its route and timeline, next to the aircraft on its stand." />
+        <div>
+          <h2>Click any flight</h2>
+          <p>See where it's from, where it's going and what it's waiting for. Swap its stand, move it up the queue, or cancel it. Each day ends with a report card and a new policy to adopt.</p>
+        </div>
+      </section>
+
+      <section class="feature">
+        <img src="images/storm.jpg" width="1600" height="1000" loading="lazy" alt="Rain over the apron, with the lights on under a dark sky." />
+        <div>
+          <h2>The weather gets a vote</h2>
+          <p>Monsoon rain slows the taxiways. Lightning clears the ramp. Smoke and fog halve your landings, and a cyclone can shut the runway altogether. Then night falls and the floodlights come on.</p>
+        </div>
+      </section>
+
+      <section class="days">
+        <h2>Pick your day</h2>
+        <ul>
+          <li><b>A normal day</b> Keep departures on time and nobody diverted.</li>
+          <li><b>Deepavali rush</b> Extra flights, and never enough stands.</li>
+          <li><b>Bhogi smoke</b> Dawn bonfires, and visibility gone.</li>
+          <li><b>Cyclone day</b> Protect what you can.</li>
+          <li><b>North-east monsoon</b> Afternoon storms roll in off the bay.</li>
+          <li><b>Night shift</b> Keep the apron and the runway lit.</li>
+          <li><b>Check-in outage</b> Boarding passes go back to manual.</li>
+          <li><b>Career</b> Finish Terminal 3 over several days.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <a class="play" href="play/">Play free</a>
+      <p>Unofficial fan project, not affiliated with AAI or any airline.<br />Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> · Weather by <a href="https://open-meteo.com/">Open-Meteo</a></p>
+    </footer>
+    <script>
+      // The game used to live at this address with an offline worker. It moved to play/ and has its own there.
+      navigator.serviceWorker?.getRegistration('./').then((r) => {
+        if (r?.scope === new URL('./', location).href) r.unregister();
+      });
+      window.caches?.delete('runway-city-v1');
+    </script>
+  </body>
+</html>
