@@ -51,7 +51,7 @@ Useful URLs: `?scenario=cyclone`, `?time=09:20`, `?speed=30` (speeds 1, 3, 10, 3
 |---|---|
 | Drag / arrow keys / one finger | Move around |
 | Wheel / pinch / + − | Zoom |
-| Space, 1–5 | Pause / resume; 1× (real time), 3× (normal), 10×, 30×, 60× |
+| Space, 1–5 | Pause / resume; 1× (normal: real time), 3×, 10×, 30×, 60× |
 | F T P O I L | Flights, Terminals, Projects, Operations, Finance, Alerts |
 | H or ? | Keys and tips |
 | F T P O L | Flights, Terminals, Projects, Operations, Alerts |

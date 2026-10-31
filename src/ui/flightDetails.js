@@ -6,6 +6,7 @@ import { cityName, distanceKm } from '../sim/airlines.js';
 import { registration } from '../sim/brands.js';
 import { esc } from '../logos.js';
 import { telemetry } from '../sim/telemetry.js';
+import { serviceTime } from '../sim/timing.js';
 import { bagCounts, teamSize } from '../sim/groundcrew.js';
 import { dial, compass, spark } from './instruments.js';
 
@@ -187,7 +188,7 @@ export function flightDetails(w, f, ui = null) {
     ${next ? `<small>Next: ${esc(next.label.toLowerCase())}${next.est ? ` about ${hhmm(next.est)}` : ''}</small>` : ''}</div>
     ${f.waiting ? `<p class="warn">⏳ ${esc(f.waiting)}</p>` : ''}`;
 
-  const route = `${leg(f.arrNo, f.from, 'MAA', t.props)}${leg(f.depNo, 'MAA', f.to, t.props)}<p class="muted fine">${f.intl ? 'International' : 'Domestic'} ${f.service === 'cargo' ? 'cargo' : f.service === 'ga' ? 'general-aviation' : ''} rotation · ${AIRCRAFT_TYPES[f.type].turnMin} min scheduled turnaround</p>`;
+  const route = `${leg(f.arrNo, f.from, 'MAA', t.props)}${leg(f.depNo, 'MAA', f.to, t.props)}<p class="muted fine">${f.intl ? 'International' : 'Domestic'} ${f.service === 'cargo' ? 'cargo' : f.service === 'ga' ? 'general-aviation' : ''} rotation · ${Math.round(serviceTime(AIRCRAFT_TYPES[f.type].turnMin))} min minimum turnaround</p>`;
   const aircraft = `<div class="kpis fd-grid"><span>Type <b>${esc(t.name)}</b></span><span>Registration <b title="Made up for the simulation">${esc(f.registration ?? registration(f.airline, f.id))}</b></span>
     <span>Engines <b>${t.engines}× ${esc(t.engineModel)}</b></span><span>Wake <b>${t.wake === 'H' ? 'Heavy' : t.wake === 'L' ? 'Light' : 'Medium'}</b></span>
     <span>Size <b>${t.length} × ${t.span} m</b></span><span>Max weight <b>${t.mtow} t</b></span></div>`;

@@ -4,6 +4,7 @@
 import { formatINR } from '../sim/world.js';
 import { INCOME, EXPENSE, TARIFFS } from '../sim/finance.js';
 import { brandOf } from '../sim/brands.js';
+import { DAY_START_H, hoursIntoDay } from '../sim/timing.js';
 import { badge, esc } from '../logos.js';
 
 const sum = (o) => Object.values(o ?? {}).reduce((a, b) => a + b, 0);
@@ -39,7 +40,7 @@ function cashflowChart(day, nowHour) {
   }).join('');
   const first = Math.max(0, day.hours.findIndex((h) => h.in > 0 || h.out > 0)); // the game may have started mid-day
   const line = runs.slice(0, nowHour + 1).map((v, i) => [i, v]).filter(([i]) => i >= first).map(([i, v]) => `${(i * bw + bw / 2).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const ticks = [0, 6, 12, 18].map((h) => `<text x="${(h * bw + 2).toFixed(1)}" y="${H - 2}">${String(h).padStart(2, '0')}</text>`).join('');
+  const ticks = [0, 6, 12, 18].map((h) => `<text x="${(h * bw + 2).toFixed(1)}" y="${H - 2}">${String((h + DAY_START_H) % 24).padStart(2, '0')}</text>`).join(''); // the day runs from 06:00
   return `<svg class="cashflow" viewBox="0 0 ${W} ${H}" role="img" aria-label="Income and expenses per hour today">
     <line x1="0" x2="${W}" y1="${((H - 14) / 2 + 5).toFixed(1)}" y2="${((H - 14) / 2 + 5).toFixed(1)}" class="axis"/>${bars}
     <rect x="${(nowHour * bw).toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H - 12}" class="now"/>
@@ -53,11 +54,11 @@ export function financePanel(w) {
   const inc = sum(day.in);
   const exp = sum(day.out);
   const profit = inc - exp;
-  const nowHour = Math.floor((w.t % 86400) / 3600);
+  const nowHour = Math.floor(hoursIntoDay(w.t));
   // Projection: today so far plus the last three hours' average for the rest of the day.
   const recent = day.hours.slice(Math.max(0, nowHour - 3), nowHour);
   const avgNet = recent.length ? recent.reduce((a, h) => a + h.in - h.out, 0) / recent.length : 0;
-  const left = 24 - ((w.t % 86400) / 3600);
+  const left = 24 - hoursIntoDay(w.t);
   const projected = profit + avgNet * left;
   const last = w.reports.at(-1);
   const yProfit = last ? last.revenue - last.costs : null;

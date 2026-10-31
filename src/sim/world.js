@@ -15,6 +15,7 @@ import { crewSprites } from './groundcrew.js';
 import { sunAt, daylight, dayPhase } from './sky.js';
 import { Terminals, PERKS } from './terminal.js';
 import { PROJECTS, freshProjects } from './projects.js';
+import { serviceTime, simDay, gameStart } from './timing.js';
 
 const KT = 0.5144;
 const GLIDE = Math.tan((3 * Math.PI) / 180);
@@ -107,7 +108,7 @@ function lineCross(A, B) {
 }
 
 export class World {
-  constructor(map, { scenarioId = 'normal', startTime = Date.now(), timetable = null, weatherMode = 'random', trafficBoost = DEFAULT_TRAFFIC_BOOST } = {}) {
+  constructor(map, { scenarioId = 'normal', startTime = gameStart(), timetable = null, weatherMode = 'random', trafficBoost = DEFAULT_TRAFFIC_BOOST } = {}) {
     this.map = map;
     // The Traffic option: extra flights on top of a normal day (0, 0.5 or 1). Other scenarios set their own level.
     this.trafficBoost = scenarioId === 'normal' ? trafficBoost : 0;
@@ -201,7 +202,7 @@ export class World {
     this.perks = [];
     this.projects = freshProjects();
     this.term = new Terminals(this);
-    this.dayIndex = Math.floor(this.t0 / 86400);
+    this.dayIndex = simDay(this.t0);
     this.dayCauses = {};
     this.airDay = {}; // per-airline results of the current day: { code: { dep, onTime, delay, cancel, divert, pax } }
     this.pendingReport = null;
@@ -532,7 +533,7 @@ export class World {
         if (this.t >= f.slot - VISIBLE_FINAL_M / f.vApp) {
           // Last stand check before committing to the approach: a late neighbour may still be parked.
           const stand = this.standById.get(f.standId);
-          const to = Math.max(f.std + 1800, f.slot + AIRCRAFT_TYPES[f.type].turnMin * 60 + 1500);
+          const to = Math.max(f.std + 1800, f.slot + serviceTime(AIRCRAFT_TYPES[f.type].turnMin * 60) + 1500);
           if (standBlocker(stand, f.type, f.slot, to, f.id)) {
             const alt = chooseStand(this.stands.filter((s) => s !== stand), f, f.slot, to);
             if (alt) {
@@ -625,7 +626,7 @@ export class World {
   #tryInbound(f) {
     if (f.standId === null) {
       const from = f.eta - 300;
-      const to = Math.max(f.std + 1800, f.eta + AIRCRAFT_TYPES[f.type].turnMin * 60 + 1500);
+      const to = Math.max(f.std + 1800, f.eta + serviceTime(AIRCRAFT_TYPES[f.type].turnMin * 60) + 1500);
       const stand = chooseStand(this.stands, f, from, to);
       if (!stand) {
         f.waiting = 'No stand available';
@@ -1477,8 +1478,9 @@ export class World {
     ];
   }
 
+  // The plans above are in real minutes; on the game clock each job takes serviceTime() of that.
   #startTurnaround(f, elapsed) {
-    f.tasks = this.#taskPlan(f).map((t) => ({ ...t, state: 'wait', start: null, end: null, vehicleIds: [] }));
+    f.tasks = this.#taskPlan(f).map((t) => ({ ...t, dur: serviceTime(t.dur), lead: t.lead && serviceTime(t.lead), state: 'wait', start: null, end: null, vehicleIds: [] }));
     f.cones = true;
     // Prewarm: complete tasks that would already be done `elapsed` seconds after on-block.
     if (elapsed > 0) {
@@ -1487,7 +1489,7 @@ export class World {
         const ready = Math.max(0, ...task.after.map((a) => finish.get(a) ?? 0));
         const end = ready + task.dur;
         finish.set(task.id, end);
-        if (end <= elapsed && task.id !== 'close') task.state = 'done';
+        if (end <= elapsed && task.id !== 'close' && !task.board && !task.lead) task.state = 'done'; // boarding and loading wait for their time before departure
       }
     }
   }
@@ -1517,7 +1519,7 @@ export class World {
       if (task.state === 'done') continue;
       if (task.state === 'wait') {
         if (!task.after.every((a) => byId.get(a)?.state === 'done')) continue;
-        const notBefore = task.board ? f.std - (task.dur + 8 * 60) : task.lead ? f.std - (task.dur + task.lead) : -Infinity;
+        const notBefore = task.board ? f.std - (task.dur + serviceTime(8 * 60)) : task.lead ? f.std - (task.dur + task.lead) : -Infinity;
         if (this.t < notBefore) continue;
         let boardInfo = null;
         if (task.board) {
@@ -1541,7 +1543,7 @@ export class World {
         if (boardInfo) {
           this.term.startBoarding(f, boardInfo.board);
           this.#mark(f, 'board');
-          task.dur = Math.max(60, boardInfo.board * 3);
+          task.dur = serviceTime(Math.max(60, boardInfo.board * 3));
         }
         task.state = needed.length ? 'driving' : 'work';
         task.start = this.t;
@@ -2237,7 +2239,7 @@ export class World {
     }
     for (const r of RANDOM_EVENTS) {
       if (r.night && !(this.lights?.amb < 0.3)) continue;
-      if (this.rnd() < ((r.perHour * (r.type === 'gseBreakdown' && this.perks.includes('gse') ? 0.5 : 1)) / 3600) * dt) this.#apply({ ...r, random: true });
+      if (this.rnd() < ((r.perHour * (r.type === 'gseBreakdown' && this.perks.includes('gse') ? 0.5 : 1)) / 3600) * dt) this.#apply({ ...r, minutes: serviceTime(r.minutes ?? 0), random: true }); // inspections and repairs
     }
   }
 
@@ -2393,7 +2395,7 @@ export class World {
     if (!f || !stand) return { ok: false, message: 'Not found' };
     if (!['scheduled', 'holding', 'inbound', 'final'].includes(f.phase)) return { ok: false, message: 'Stand can only be changed before landing' };
     const from = f.eta - 300;
-    const to = Math.max(f.std + 1800, f.eta + AIRCRAFT_TYPES[f.type].turnMin * 60 + 1500);
+    const to = Math.max(f.std + 1800, f.eta + serviceTime(AIRCRAFT_TYPES[f.type].turnMin * 60) + 1500);
     const why = standBlocker(stand, f.type, from, to, f.id);
     if (why) return { ok: false, message: why };
     this.#assign(f, stand, from, to);
@@ -2881,7 +2883,7 @@ export class World {
   // ---- day report card ------------------------------------------------------------------------
 
   #dayCheck() {
-    const day = Math.floor(this.t / 86400);
+    const day = simDay(this.t);
     if (day > this.dayIndex) {
       this.dayIndex = day;
       this.#closeDay();

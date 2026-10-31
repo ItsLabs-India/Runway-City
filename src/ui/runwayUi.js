@@ -1,6 +1,7 @@
 // Runway control: the plan for both runways, and one card per runway with its direction, role, state and
 // traffic. Pure functions of the World; buttons carry data-action as everywhere else.
 import { RUNWAY_MODES, RUNWAY_PLANS } from '../sim/world.js';
+import { serviceTime } from '../sim/timing.js';
 import { esc } from '../logos.js';
 
 const hhmm = (t) => `${String(Math.floor((t % 86400) / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}`;
@@ -43,7 +44,7 @@ export function runwayCard(st) {
     </div>
     ${landing ? `<p class="fine">Next landings: ${next || 'none booked'}</p>` : ''}` : ''}
     ${rules.length ? `<p class="muted fine">${rules.join(' · ')}</p>` : ''}
-    ${st.mode !== 'off' ? `<div class="row-actions">${st.closed ? `<button data-action="reopenRunway" data-arg="${st.ref}">Reopen</button>` : `<button data-action="inspectRunway" data-arg="${st.ref}">Close 15 min (inspection)</button>`}</div>` : ''}
+    ${st.mode !== 'off' ? `<div class="row-actions">${st.closed ? `<button data-action="reopenRunway" data-arg="${st.ref}">Reopen</button>` : `<button data-action="inspectRunway" data-arg="${st.ref}">Close ${serviceTime(15)} min (inspection)</button>`}</div>` : ''}
   </div>`;
 }
 

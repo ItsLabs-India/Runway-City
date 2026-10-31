@@ -9,12 +9,13 @@ import { SCENARIOS } from '../sim/scenarios.js';
 import { PERKS, PROCESSES, fmtCr } from '../sim/terminal.js';
 import { panel, selectionPanel, hhmm, esc } from './panels.js';
 import { setSectionOpen } from './flightDetails.js';
+import { simDay } from '../sim/timing.js';
 
-const clockText = (t) => `Day ${Math.floor(t / 86400) + 1} · ${hhmm(t)} IST`;
+const clockText = (t) => `Day ${simDay(t) + 1} · ${hhmm(t)} IST`;
 const SPEEDS = [0, 1, 3, 10, 30, 60];
 // [id, button label, key, panel title]
 const TABS = [['board', 'Flights', 'F', 'Flights'], ['term', 'Terminals', 'T', 'Terminals'], ['proj', 'Projects', 'P', 'Projects'], ['ops', 'Ops', 'O', 'Operations'], ['fin', 'Finance', 'I', 'Finance and management'], ['log', 'Alerts', 'L', 'Alerts']];
-const KEYS = [['Space', 'Pause / resume'], ['1 – 5', 'Speed: 1× real time, 3× normal, 10×, 30×, 60×'], ['F', 'Flights board and airlines'], ['T', 'Terminals: queues, staff, building'], ['P', 'Projects'], ['O', 'Operations: weather, lights, runway, vehicles, crews'], ['I', 'Finance and management'], ['L', 'Alerts'], ['M', 'Sound on / off'], ['H or ?', 'This help'], ['+ / −, wheel, pinch', 'Zoom'], ['Arrow keys, drag', 'Move the map'], ['Esc', 'Close the card, the panel or a dialog']];
+const KEYS = [['Space', 'Pause / resume'], ['1 – 5', 'Speed: 1× normal (real time), 3×, 10×, 30×, 60×'], ['F', 'Flights board and airlines'], ['T', 'Terminals: queues, staff, building'], ['P', 'Projects'], ['O', 'Operations: weather, lights, runway, vehicles, crews'], ['I', 'Finance and management'], ['L', 'Alerts'], ['M', 'Sound on / off'], ['H or ?', 'This help'], ['+ / −, wheel, pinch', 'Zoom'], ['Arrow keys, drag', 'Move the map'], ['Esc', 'Close the card, the panel or a dialog']];
 
 // Panel title bar, and a row of jump links for long panels (one per section heading).
 function decorate(tab, html) {
@@ -40,7 +41,7 @@ export function createHud(root, cb) {
     <header class="bar" role="toolbar" aria-label="Game controls">
       <div class="brand">Runway City <span>MAA</span></div>
       <div class="clock" data-clock aria-live="off">--:--</div>
-      <div class="group" role="group" aria-label="Game speed">${SPEEDS.map((s) => `<button data-speed="${s}" aria-label="${s ? `${s} times speed` : 'Pause'}" title="${s ? `${s === 1 ? 'Real time' : s === 3 ? 'Normal speed (3× real time)' : `${s}× real time`} (key ${SPEEDS.indexOf(s)})` : 'Pause (Space)'}">${s === 0 ? '❚❚' : `${s}×`}</button>`).join('')}</div>
+      <div class="group" role="group" aria-label="Game speed">${SPEEDS.map((s) => `<button data-speed="${s}" aria-label="${s ? `${s} times speed` : 'Pause'}" title="${s ? `${s === 1 ? 'Normal speed: one clock second per real second' : `${s}× real time`} (key ${SPEEDS.indexOf(s)})` : 'Pause (Space)'}">${s === 0 ? '❚❚' : `${s}×`}</button>`).join('')}</div>
       <div class="stats" data-stats></div>
       <div class="group tabs" role="group" aria-label="Panels">
         ${TABS.map(([id, label, key, title]) => `<button data-tab="${id}" title="${title} (${key})">${label}${id === 'log' ? ' <b data-alerts></b>' : ''}</button>`).join('')}
@@ -200,7 +201,7 @@ export function createHud(root, cb) {
             <li>Click the money, on-time, satisfaction or runway figures in the top bar to jump to where you manage them.</li>
             <li>Click any aircraft, stand, terminal or the runway for its card; the flight card shows live data and the whole turnaround.</li>
             <li>Long panels have section links at the top. Finance shows where every rupee comes from and goes.</li>
-            <li>The game runs at 3× real time; use 1× to watch closely, 30× or 60× to skip quiet hours.</li>
+            <li>Every day starts at 06:00. At 1× the clock runs in real time and ground services take 30 % of their real time (a 10-minute job takes 3 minutes); 3× to 60× skip quiet hours.</li>
             <li>Weather can be set to calm in the menu or the Operations panel if storms make a busy day too hard.</li>
           </ul>
         </div>`;
@@ -255,7 +256,7 @@ export function createHud(root, cb) {
     },
 
     update(world, selection, speed, ui) {
-      $('[data-clock]').innerHTML = `<b>${hhmm(world.t)}</b><small>Day ${Math.floor(world.t / 86400) + 1} · IST</small>`; // minutes are enough at 3x and faster
+      $('[data-clock]').innerHTML = `<b>${hhmm(world.t)}${speed > 1 ? '' : `:${String(Math.floor(world.t % 60)).padStart(2, '0')}`}</b><small>Day ${simDay(world.t) + 1} · IST</small>`; // minutes are enough at 3x and faster
       const k = world.kpi;
       const otp = k.departures ? Math.round((k.onTime / k.departures) * 100) : 100;
       const inUse = world.runways.filter((R) => R.mode !== 'off');

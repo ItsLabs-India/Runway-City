@@ -20,6 +20,7 @@
     "check:ground": "node scripts/ground-check.mjs",
     "check:finance": "node scripts/finance-check.mjs",
     "check:gridlock": "node scripts/gridlock-check.mjs",
+    "check:time": "node scripts/time-check.mjs",
     "logos": "node scripts/index-logos.mjs",
     "check:terminals": "node scripts/term-check.mjs",
     "check:sound": "vite build && node scripts/sound-check.mjs",

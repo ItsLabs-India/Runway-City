@@ -17,7 +17,7 @@ A 2D top-down airport management game in the browser, modelled on the **real Che
 |---|---|
 | Rendering | **2D top-down map on Canvas 2D** (no 3D engine). North up; drag to pan, wheel/pinch/+− to zoom, follow-aircraft. Static airport cached to an offscreen layer (redrawn only when the camera moves); traffic drawn on top each frame. Detail appears by zoom level (LOD) |
 | Language / build | Plain JavaScript (ES modules) + Vite |
-| Simulation | Pure logic in `src/sim/` (no DOM), 1 s ticks, 0/1/3/10/30/60× speed (3× is the default: the clock, services and movement all run 3× real time; 1× is real time, needed for live data); whole state saved with `World.snapshot()` / `restore()` (deterministic: restored games replay identically) |
+| Simulation | Pure logic in `src/sim/` (no DOM), 1 s ticks, 0/1/3/10/30/60× speed (1× is the default: one clock second per real second; see "Time" in section 7); whole state saved with `World.snapshot()` / `restore()` (deterministic: restored games replay identically) |
 | Map data | OSM extracts (airside, landside, surroundings) → `scripts/build-map.mjs` → `public/data/maa-map.json` (~1.4 MB; local metres `[x, y]`: x east, y south) |
 | Aircraft / vehicles | 11 real types (ATR 72, Q400, A320neo, A321neo, 737-800, 737 MAX 8, 787-8/-9, A350-900, A340-300, 777-300ER). Real dimensions in `src/sim/aircraftTypes.js` → geometry in `src/sim/airframe.js` → drawn by `src/map/sprites.js` and collided by `footprint.js` (same shapes). Generic neutral tails. No licensed art |
 | Passengers | Aggregate queues per process + a small sample of drawn people (never thousands of agents) |
@@ -41,8 +41,8 @@ src/persist.js       IndexedDB + file export/import        src/audio.js  optiona
 src/live/            real wind (Open-Meteo / METAR) and Live Watch ghosts
 src/map/             camera, renderer, props, sprites, geometry
 aircraft.html        developer viewer of the fleet (`npm run aircraft` saves screenshots)
-src/sim/             world, terminal (passengers, staff, modules), projects, taxiGraph, stands, footprint,
-                     schedule, airlines, brands, weather, sky, aircraftTypes, airframe, scenarios, lineCheck
+src/sim/             world, timing (game clock, service times), terminal (passengers, staff, modules), projects, taxiGraph,
+                     stands, footprint, schedule, airlines, brands, weather, sky, aircraftTypes, airframe, scenarios, lineCheck
 src/ui/              hud (shell, menu, report), panels (all panels as pure functions)
 ```
 
@@ -87,7 +87,7 @@ src/ui/              hud (shell, menu, report), panels (all panels as pure funct
   arrivals immigration → reclaim, per terminal (T1, T4, T2, T3, T5). Capacity = open positions × tier rate,
   where open positions come from the staffing dial (Auto / Lean / Standard / Surge) limited by on-duty staff
   (headcount × shift template share). Departing passengers must clear security before boarding starts:
-  at 92 % cleared, or at gate closure (STD − 18 min) the rest are offloaded (money + satisfaction penalty).
+  at 92 % cleared, or at gate closure (`serviceTime(18 min)` before STD) the rest are offloaded (money + satisfaction penalty).
 - **Quick / group building** is by panel, not by placing objects: add positions in steps, upgrade technology,
   bulk "upgrade all", **plan mode** (stage, preview cost and time, Build all), **layout codes** (`RC1.…`,
   copy and stamp onto another terminal). Nothing is built instantly; every order has a build time.
@@ -95,14 +95,14 @@ src/ui/              hud (shell, menu, report), panels (all panels as pure funct
   with 22 m bridges (`stand.bridge`). Locked stands are skipped by the renderer, picking and paint.
 - **Projects** (`projects.js`): rets (spacing × 0.8), cat3 (low-vis 2× → 1.3×), hydrant (+6 fuel, 30 % faster),
   t3, t5. Effects are read through getters (`sepScale`) so a restored game keeps them.
-- **Day report** at IST midnight (`pendingReport`, one policy perk of three). The game loop pauses while any
+- **Day report** when the sim day ends at 06:00 IST (`pendingReport`, one policy perk of three). The game loop pauses while any
   modal is open.
 - **Live data is optional**: real wind from Open-Meteo (CORS ok) or METAR via `/api/metar`; "Live Watch" draws real
   aircraft from `/api/traffic` as translucent ghosts with the adsb.fi credit (non-commercial terms: keep the
   game free). Military / privacy-flagged aircraft are removed in the worker. Feeds off = game unchanged.
 - **Timetable**: if `public/data/timetable.json` exists it replaces the generated day (weekday-aware).
 - **Tests to keep green**: `npm run check -- <scenario> 24` (0 overlaps, 0 stuck, gears < 1 m off the lines),
-  `npm run check:terminals`, `npm run test:ui`.
+  `npm run check:terminals`, `npm run check:time`, `npm run test:ui`.
 
 ## 4. Coordinates and facts
 
@@ -137,7 +137,8 @@ src/ui/              hud (shell, menu, report), panels (all panels as pure funct
 
 - Keep the simulation independent of rendering, so speed-up, saves and the Worker move stay easy.
 - Keep real-world facts in data files, not code; refresh schedules each IATA season.
-- Test URLs: `?time=HH:MM` (IST start time), `?scenario=normal|festival|bhogi|cyclone|outage|sandbox` (skips the chooser), `?view=terminals|runway25|stands|gate`, `?speed=0|1|5|20|60`, `?warm=SECONDS` (run the sim ahead), `?panel=board|ops|log`.
+- Time (2026-10-31): `sim/timing.js`. The game clock is not the real-world clock: every new game (every scenario) and every sim day starts at 06:00 IST; only the date and season come from the real date. A day runs 06:00 to 06:00 (`simDay`, `hoursIntoDay`): the report, the Day number and the books' hours follow it (`hours[0]` is 06:00). 1× is the default and means one clock second per real second; the other buttons are exact multiples (`npm run test:ui` measures them). Movement stays at real speed. Work takes `SERVICE_TIME` (0.3) of its real duration: turnaround tasks and their lead times (the plans in `world.js` stay in real minutes, `#startTurnaround` scales them), gate closure, passengers leaving the aircraft, runway inspections and random-event repairs. Not scaled, on purpose: the timetable (STA / STD stay real, so aircraft finish servicing early and wait for their departure time), runway separation, passenger process rates (they are capacity against real passenger numbers), walking, construction, weather, and scripted scenario disruptions. Add new ground work in real time and pass it through `serviceTime()`. Keep `npm run check:time` green.
+- Test URLs: `?time=HH:MM` (IST start time, tests only: a game otherwise starts at 06:00), `?scenario=normal|festival|bhogi|cyclone|outage|sandbox` (skips the chooser), `?view=terminals|runway25|stands|gate`, `?speed=0|1|3|10|30|60`, `?warm=SECONDS` (run the sim ahead), `?panel=board|ops|log`.
 - Real-world facts OSM lacks (displaced thresholds, approach-light lengths) come from the eAIP and live in `build-map.mjs` / `renderer.js` constants. OSM boarding-gate doors on terminal facades are filtered out of stands (`props.js`).
 - Decided 2026-10-29 (after trying isometric and 3D): the game is a **full 2D top-down map**, drag/pan/zoom only. Do not reintroduce 3D, tilt or rotation.
 - Two runways (2026-10-31): `world.runways` = [07/25 `main`, 12/30 `second`], each with its own direction, `mode` (both / arr / dep / off), `user`, `closures`, `arrSlots`, `lastDeparture`, exits and entry. A flight's runway is `f.rwy` (`world.runwayOf(f)`), chosen at booking (`#bookSlot`: soonest, least booked, 07/25 slightly preferred) and at the gate (`#chooseDeparture`). Never use a global runway: pass R to `#along`, `#offCentre`, `#runwayNeighbour`, `#bestExit`. Wide-bodies only on 07/25. Taxi crossings stop at any runway in use (`stop.rw`); a runway with mode off is plain pavement. The centrelines meet just past the 30 end (`crossPoint`): `#usesCrossing` says which movements pass it, `#crossingBusy` makes them take turns (07 and 12 landings are independent). `RUNWAY_PLANS` are presets; UI in `ui/runwayUi.js`. Default plan: dual landing. Keep `npm run check:runways` green.

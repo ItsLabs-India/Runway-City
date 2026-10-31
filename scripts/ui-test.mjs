@@ -341,7 +341,7 @@ if (process.env.DEBUG_GRIDLOCK) console.log(await W(() => {
   lines.push('overrides ' + JSON.stringify((w.overrides ?? []).slice(-6)));
   return lines.join(String.fromCharCode(10));
 }));
-check('day report appears at midnight', (await W(() => document.querySelector('[data-modal] h1').innerText)).toLowerCase().includes('report'));
+check('day report appears when the sim day ends',(await W(() => document.querySelector('[data-modal] h1').innerText)).toLowerCase().includes('report'));
 const reportAl = await W(() => ({ airlines: document.querySelector('[data-modal]').innerText.includes('Airlines'), rows: document.querySelectorAll('[data-modal] .rgroup .al').length, day: window.__runway.world.pendingReport?.airlines?.length, text: document.querySelector('[data-modal]').innerText.slice(0, 400) }));
 check('day report lists results by airline group', reportAl.airlines && reportAl.rows >= 3, JSON.stringify(reportAl));
 await page.screenshot({ path: `${out}/report.png` });
@@ -451,6 +451,25 @@ await page.reload();
 await page.waitForFunction(() => window.__runway?.world, null, { timeout: 15000 }).catch(() => {});
 check('game loads offline', await W(() => Boolean(window.__runway?.world)));
 await context.setOffline(false);
+
+// ---- the game clock: starts at 06:00 and runs at the rate the speed buttons say -----------------------------
+await page.goto(`${URL}/?scenario=normal`);
+await page.waitForFunction(() => window.__runway?.world);
+await settle();
+const opening = await W(() => ({ t: window.__runway.world.t, normal: document.querySelector('[data-speed="1"]').classList.contains('active'), clock: document.querySelector('[data-clock] b').innerText }));
+check('a new game starts at 06:00, whatever the real time', opening.t >= 21600 && opening.t < 21660 && /^06:00:\d\d$/.test(opening.clock), JSON.stringify(opening));
+check('a new game runs at 1×', opening.normal);
+for (const s of [1, 3, 10, 30, 60]) {
+  const rate = await W(async (x) => {
+    const r = window.__runway;
+    r.setSpeed(x);
+    const [t0, w0] = [r.world.t, performance.now()];
+    await new Promise((done) => setTimeout(done, 3000));
+    return (r.world.t - t0) / ((performance.now() - w0) / 1000);
+  }, s);
+  check(`at ${s}× the clock runs ${s} seconds per real second`, Math.abs(rate / s - 1) < 0.05, `measured ${rate.toFixed(2)}`);
+}
+await W(() => window.__runway.setSpeed(0));
 
 // ---- phone: layout, touch pan, pinch zoom --------------------------------------------------------------------
 const phone = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2.6, hasTouch: true, isMobile: true });

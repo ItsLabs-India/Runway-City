@@ -2,6 +2,8 @@
 // arrivals immigration and baggage reclaim. Capacity = positions × tier rate, limited by on-duty
 // staff. Departing passengers appear before each flight's STD and must clear security before
 // boarding; arriving passengers leave the aircraft and flow to reclaim. All state is plain data.
+import { serviceTime } from './timing.js';
+
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const cdf = (u) => {
   const x = clamp(u, 0, 1);
@@ -233,8 +235,8 @@ export class Terminals {
       }
       if (f.onBlock !== null && f.onBlock !== undefined && p.inn < f.paxIn - 1e-6) {
         p.term ??= this.termFor(f);
-        const span = Math.max(240, f.paxIn * 1.6);
-        const start = f.onBlock + 60;
+        const span = serviceTime(Math.max(240, f.paxIn * 1.6)); // they leave the aircraft as fast as the deboarding task runs
+        const start = f.onBlock + serviceTime(60);
         const add = clamp((t - start) / span, 0, 1) * f.paxIn - p.inn;
         if (add > 0.5 || (t >= start + span && add > 1e-6)) {
           p.inn += add;
@@ -381,12 +383,12 @@ export class Terminals {
   // ---- boarding gate -------------------------------------------------------------------------
 
   // May boarding start? Needs 92 % of passengers through security (and emigration), or the gate
-  // closure time (STD − 18 min) after which the rest are offloaded.
+  // closure time (18 min of work before STD: 5.4 on the clock) after which the rest are offloaded.
   boardingReady(f) {
     const p = f.pax;
     if (!p) return { ok: true, board: f.paxOut };
     const t = this.w.t;
-    const closing = t >= f.std - 18 * 60;
+    const closing = t >= f.std - serviceTime(18 * 60);
     if (p.done >= 0.92 * f.paxOut || closing) return { ok: true, board: Math.min(f.paxOut, Math.floor(p.done + 1e-6)) };
     return { ok: false, reason: `Passengers still in the ${this.bottleneck(f).toLowerCase()} queue`, cause: `${this.bottleneck(f)} queue` };
   }

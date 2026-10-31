@@ -5,6 +5,7 @@ import { World, DEFAULT_TRAFFIC_BOOST, TRAFFIC_LEVELS } from './sim/world.js';
 import { standBlocker } from './sim/stands.js';
 import { AIRCRAFT_TYPES } from './sim/aircraftTypes.js';
 import { SCENARIOS } from './sim/scenarios.js';
+import { serviceTime, simDay, gameStart } from './sim/timing.js';
 import { fmtCr } from './sim/terminal.js';
 import { createHud } from './ui/hud.js';
 import { createLineIndex, gearDeviation } from './sim/lineCheck.js';
@@ -24,9 +25,10 @@ const VIEWS = {
   stands: { x: -700, y: 1180, scale: 3 },
   gate: { x: -722, y: 1135, scale: 8 },
 };
-// 1× is real time; the game normally runs at 3× (clock, services and movement all three times faster).
+// 1× is the normal speed: one second on the game clock per real second. See sim/timing.js.
 const SPEEDS = new Set([0, 1, 3, 10, 30, 60]);
-const DEFAULT_SPEED = 3;
+const DEFAULT_SPEED = 1;
+const MAX_FRAME_S = 1; // a slow frame still advances the clock in full; a long pause (hidden tab) does not catch up
 const DAILY = ['normal', 'festival', 'bhogi', 'cyclone', 'outage'];
 const AUTOSAVE_MS = 20_000;
 
@@ -88,14 +90,10 @@ try {
 
 // ---- starting, saving, loading ---------------------------------------------------------------
 
-// ?time=HH:MM starts the day at that IST time (default: the real time now).
-function startTime(scenarioId) {
-  let m = /^(\d{1,2}):(\d{2})$/.exec(params.get('time') ?? '');
-  const hour = SCENARIOS[scenarioId]?.startHour; // scenarios such as the night shift start at a set time
-  if (!m && hour !== undefined) m = [null, String(hour), '00'];
-  if (!m) return Date.now();
-  const now = new Date(Date.now() + 5.5 * 3600e3);
-  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), Number(m[1]), Number(m[2])) - 5.5 * 3600e3;
+// A new game always starts at 06:00 IST; ?time=HH:MM starts it at another time, for testing.
+function startTime() {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(params.get('time') ?? '');
+  return m ? gameStart(Date.now(), Number(m[1]), Number(m[2])) : gameStart();
 }
 
 // Random weather (the seasons decide) or calm weather, remembered between visits.
@@ -126,7 +124,7 @@ function dailyId() {
 
 function start(scenarioId, snap = null) {
   stopLive();
-  world = new World(map, { scenarioId, startTime: startTime(scenarioId), timetable: Array.isArray(timetable) ? timetable : null, weatherMode: weatherPref(), trafficBoost: trafficPref() });
+  world = new World(map, { scenarioId, startTime: startTime(), timetable: Array.isArray(timetable) ? timetable : null, weatherMode: weatherPref(), trafficBoost: trafficPref() });
   if (snap) world.restore(snap);
   world.radioOn = ui.voice;
   renderer = new MapRenderer(canvas, map, world.stands, world.graph);
@@ -267,7 +265,7 @@ function act(action, arg) {
       const blob = new Blob([financeCsv(world)], { type: 'text/csv' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `runway-city-books-day${Math.floor(world.t / 86400) + 1}.csv`;
+      a.download = `runway-city-books-day${simDay(world.t) + 1}.csv`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       report({ ok: true, message: 'The books were exported as CSV' });
@@ -315,7 +313,7 @@ function act(action, arg) {
     case 'pickStand': {
       const f = world.flights.find((x) => x.id === Number(arg));
       const from = f.eta - 300;
-      const to = Math.max(f.std + 1800, f.eta + AIRCRAFT_TYPES[f.type].turnMin * 60 + 1500);
+      const to = Math.max(f.std + 1800, f.eta + serviceTime(AIRCRAFT_TYPES[f.type].turnMin * 60) + 1500);
       standPick = { flightId: f.id, valid: new Map(world.stands.map((s) => [s.id, standBlocker(s, f.type, from, to, f.id)])) };
       hud.banner(`Choose a stand for ${f.arrNo} (${f.type}): green rings are free and fit`);
       break;
@@ -331,7 +329,7 @@ function act(action, arg) {
       report(world.switchRunway(arg || '07/25'));
       break;
     case 'inspectRunway':
-      report(world.closeRunway(15, 'Runway inspection ordered', arg || '07/25'));
+      report(world.closeRunway(serviceTime(15), 'Runway inspection ordered', arg || '07/25'));
       break;
     case 'reopenRunway':
       report(world.reopenRunway(arg || '07/25'));
@@ -645,7 +643,7 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) navigator.serviceWorke
 let last = performance.now();
 let uiTimer = 0;
 function frame(now) {
-  const dt = Math.min(0.1, (now - last) / 1000);
+  const dt = Math.min(MAX_FRAME_S, (now - last) / 1000);
   last = now;
   if (world) {
     const modal = hud.modalKind !== null;

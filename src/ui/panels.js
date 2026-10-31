@@ -11,6 +11,7 @@ import { runwayControl, runwayPanelFor } from './runwayUi.js';
 import { financePanel } from './financeUi.js';
 import { flightDetails } from './flightDetails.js';
 import { ROLES } from '../sim/groundcrew.js';
+import { simDay } from '../sim/timing.js';
 import { airlinesView, airlineLine, boardControls, groupedRows, nameOf } from './airlines.js';
 import { PROCESSES, PROC_ORDER, DIALS, DEPTS, SHIFTS, PERKS, TERMINAL_DEFS, fmtCr } from '../sim/terminal.js';
 
@@ -24,7 +25,7 @@ export function hhmm(t) {
 
 export function clock(t) {
   const d = ((Math.floor(t) % 86400) + 86400) % 86400;
-  return `Day ${Math.floor(t / 86400) + 1} · ${hhmm(t)}:${String(d % 60).padStart(2, '0')} IST`;
+  return `Day ${simDay(t) + 1} · ${hhmm(t)}:${String(d % 60).padStart(2, '0')} IST`;
 }
 
 export function panel(tab, w, ui) {
@@ -236,7 +237,7 @@ function opsPanel(w, ui) {
       ${toggle('voice', ui.voice, 'ATC voice')}
       ${toggle('sound', ui.sound, 'Sound', 'Wind, rain, aircraft and vehicles: zoom in to hear them')}
     </div>
-    <p class="muted fine">Real weather and Live Watch follow the real clock: they match the game exactly at 1× speed.</p>
+    <p class="muted fine">Real weather and Live Watch show the real world right now; the game keeps its own clock, which starts each day at 06:00.</p>
     <h3>Ground crews</h3>
     <table class="fleet"><tr class="${w.crews.busy >= w.crews.total ? 'short' : ''}"><td>${esc(CREW.label)}</td><td>${w.crews.busy}/${w.crews.total}</td>
       <td class="buy"><button data-action="hire" data-arg="crew:5" title="${formatINR(CREW.hireCost * 5)} to hire, ${formatINR(CREW.dayCost)} per crew per day">+5</button><button data-action="hire" data-arg="crew:-1">−1</button></td></tr></table>

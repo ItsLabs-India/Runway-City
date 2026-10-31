@@ -1,3 +1,5 @@
+import { hoursIntoDay } from './timing.js';
+
 // The airport's books: every rupee in and out, by category, by hour of the day, by airline, plus a log of
 // the larger one-off transactions. Pure data (no DOM); saved with the game.
 
@@ -49,7 +51,7 @@ export class Ledger {
     const book = this.day[kind];
     book[cat] = (book[cat] ?? 0) + amount;
     this.total[kind][cat] = (this.total[kind][cat] ?? 0) + amount;
-    const h = Math.floor((((t % 86400) + 86400) % 86400) / 3600);
+    const h = Math.floor(hoursIntoDay(t)); // hours[0] is the first hour of the sim day (06:00)
     this.day.hours[h][kind] += amount;
     if (meta?.airline && kind === 'in') this.day.airlines[meta.airline] = (this.day.airlines[meta.airline] ?? 0) + amount;
     if (meta?.label) {
