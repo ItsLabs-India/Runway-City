@@ -4,9 +4,10 @@ import { GSE, CREW, PHASE_LABEL, formatINR } from '../sim/world.js';
 import { AIRCRAFT_TYPES } from '../sim/aircraftTypes.js';
 import { cityName } from '../sim/airlines.js';
 import { PROJECTS } from '../sim/projects.js';
-import { brandOf } from '../sim/brands.js';
+import { brandOf, registration } from '../sim/brands.js';
 import { badge } from '../logos.js';
 import { weatherPanel } from './weatherUi.js';
+import { runwayControl, runwayPanelFor } from './runwayUi.js';
 import { financePanel } from './financeUi.js';
 import { flightDetails } from './flightDetails.js';
 import { ROLES } from '../sim/groundcrew.js';
@@ -91,7 +92,7 @@ function chart(demand, capacity) {
     return `<rect x="${i * 14 + 1}" y="${28 - h}" width="11" height="${h}" class="${d > capacity ? 'over' : 'fit'}"/>`;
   }).join('');
   const y = 28 - (capacity / max) * 26;
-  return `<svg class="chart" viewBox="0 0 168 30" role="img" aria-label="Expected passengers per hour for the next 12 hours against capacity">${bars}<line x1="0" x2="168" y1="${y}" y2="${y}"/></svg>`;
+  return `<svg class="chart" viewBox="0 0 168 30" preserveAspectRatio="none" role="img" aria-label="Expected passengers per hour for the next 12 hours against capacity">${bars}<line x1="0" x2="168" y1="${y}" y2="${y}"/></svg>`;
 }
 
 function terminalAirlines(w, id) {
@@ -139,7 +140,8 @@ function terminalsPanel(w, ui) {
     }).join('');
     const pods = [2, 4].map((n) => `<button data-action="retail" data-arg="${T.id}:${n}" title="${fmtCr(n * 5e5)}">+${n}</button>`).join('');
     body = `<div class="term-h"><b>${esc(T.name)}</b> <span class="wait ${T.score > 85 ? 'ok' : T.score > 65 ? 'mid' : 'bad'}">service ${Math.round(T.score)} %</span>
-      <span class="muted">${Math.round(T.airside)} passengers airside · retail ${T.retail.pods}/${T.retail.cap} pods</span> ${pods}</div>
+      <span class="muted">${Math.round(T.airside)} passengers airside</span></div>
+      <div class="ctl"><span class="lbl">Retail: ${T.retail.pods} of ${T.retail.cap} pods</span><span class="proc-a">${pods}</span></div>
       <p class="airl"><span class="lbl">Airlines here</span> ${terminalAirlines(w, T.id)}</p>
       ${procs}
       ${built ? `<h3>Under construction</h3><ul class="builds">${built}</ul>` : ''}
@@ -151,13 +153,16 @@ function terminalsPanel(w, ui) {
   const planBox = ui.planMode ? `<div class="plan"><h3>Plan <small>(nothing is built until you press Build all)</small></h3>
     ${plan.items.length ? `<ul>${plan.items.map((i) => `<li class="${i.ok ? '' : 'bad'}">${describeOp(i.op, w)} ${i.ok ? `· ${fmtCr(i.cost)}` : `· ${esc(i.why)}`}</li>`).join('')}</ul>
       <p>Total <b>${fmtCr(plan.cost)}</b> · ready in <b>${Math.round(plan.minutes)} min</b> · you have ${fmtCr(w.money)}</p>
-      <div class="row-actions"><button data-action="buildPlan" ${plan.ok ? '' : 'disabled'}>Build all</button><button data-action="clearPlan">Clear</button></div>` : '<p class="muted">Use the +, → and bulk-upgrade buttons to stage changes.</p>'}</div>` : '';
+      <div class="row-actions"><button data-action="buildPlan" class="primary" ${plan.ok ? '' : 'disabled'}>Build all</button><button data-action="clearPlan">Clear</button></div>` : '<p class="muted">Use the +, → and bulk-upgrade buttons to stage changes.</p>'}</div>` : '';
 
-  return `<div class="row-actions"><button data-action="planMode" class="${ui.planMode ? 'on' : ''}" aria-pressed="${ui.planMode}">Plan mode ${ui.planMode ? 'on' : 'off'}</button>${shifts}</div>
+  return `<div class="ctl"><span class="lbl">Stage changes, then build them together</span><button data-action="planMode" class="${ui.planMode ? 'on' : ''}" aria-pressed="${ui.planMode}">Plan mode ${ui.planMode ? 'on' : 'off'}</button></div>
     ${planBox}
-    <h3>Staff <small>(shifts: ${esc(SHIFTS[w.term.shift].label)})</small></h3><table class="fleet">${staff}</table>
-    ${bulk ? `<h3>Upgrade planner</h3><div class="row-actions">${bulk}</div>` : ''}
-    <div class="seg term-tabs">${tabs}</div>${body}`;
+    <h3>Terminal</h3>
+    <div class="seg term-tabs">${tabs}</div>${body}
+    <h3>Staff</h3>
+    <div class="ctl"><span class="lbl">Shift pattern</span><div class="seg" role="group" aria-label="Shift pattern">${shifts}</div></div>
+    <table class="fleet">${staff}</table>
+    ${bulk ? `<h3>Upgrade every terminal</h3><div class="row-actions">${bulk}</div>` : ''}`;
 }
 
 export function describeOp(op, w) {
@@ -177,12 +182,12 @@ function projectsPanel(w) {
     const needs = p.needs.filter((n) => w.projects[n].state !== 'done');
     const pct = st.state === 'building' ? Math.min(100, ((w.t - st.startedAt) / (st.finishAt - st.startedAt)) * 100) : st.state === 'done' ? 100 : 0;
     const action = st.state === 'idle'
-      ? `<button data-action="project" data-arg="${id}" ${needs.length ? 'disabled' : ''}>Start · ${fmtCr(p.cost)} · ${p.hours} h</button>${needs.length ? `<span class="muted">needs ${esc(PROJECTS[needs[0]].name)}</span>` : ''}`
-      : st.state === 'building' ? `<span>Ready at ${hhmm(st.finishAt)} (${Math.round(pct)} %)</span>` : '<span class="ok">Complete</span>';
-    return `<div class="card-p ${st.state}"><b>${esc(p.name)}</b><p>${esc(p.story)}</p><p class="eff">${esc(p.effect)}</p><i class="bar-p" style="--p:${pct}%"></i><div class="row-actions">${action}</div></div>`;
+      ? `<button data-action="project" data-arg="${id}" ${needs.length ? 'disabled' : ''}>Start · ${fmtCr(p.cost)} · ${p.hours} h</button>${needs.length ? `<span class="muted fine">Needs ${esc(PROJECTS[needs[0]].name)} first</span>` : w.money < p.cost ? '<span class="muted fine">Not enough cash yet</span>' : ''}`
+      : st.state === 'building' ? `<span>Ready at ${hhmm(st.finishAt)} (${Math.round(pct)} %)</span>` : '<i class="tag ok">Complete</i>';
+    return `<div class="card-p ${st.state}"><b>${esc(p.name)}</b><p>${esc(p.story)}</p><p class="eff">${esc(p.effect)}</p>${st.state === 'building' ? `<i class="bar-p" style="--p:${pct}%"></i>` : ''}<div class="row-actions">${action}</div></div>`;
   }).join('');
   const perks = w.perks.length ? `<h3>Policies adopted</h3><ul class="obj">${w.perks.map((id) => `<li class="ok">✔ ${esc(PERKS[id].label)} <b>${esc(PERKS[id].text)}</b></li>`).join('')}</ul>` : '';
-  return `<p class="muted">Costs and build times are scaled for play: a real terminal takes years. Money: <b>${formatINR(w.money)}</b>.</p>${cards}${perks}`;
+  return `<div class="ctl"><span class="lbl">Cash available</span><b>${formatINR(w.money)}</b></div>${cards}${perks}<p class="muted fine">Costs and build times are scaled for play: a real terminal takes years.</p>`;
 }
 
 // ---- operations --------------------------------------------------------------------------------
@@ -208,9 +213,8 @@ function opsPanel(w, ui) {
     return `<tr class="${free <= 0 ? 'short' : ''}"><td>${esc(g.label)}</td><td>${p.busy}/${p.total}${p.broken ? ` <i>(${p.broken} broken)</i>` : ''}</td>
       <td class="buy"><button data-action="buy" data-arg="${kind}:1" title="${formatINR(g.price)} each">+1</button><button data-action="buy" data-arg="${kind}:5" title="${formatINR(g.price * 5)}">+5</button><button data-action="sell" data-arg="${kind}:1" title="Sell one at half price">−1</button></td></tr>`;
   }).join('');
-  const other = Object.keys(w.frame.ends).find((d) => d !== w.active);
   const live = ui.live ?? {};
-  const toggle = (action, on, label, note = '') => `<button data-action="${action}" class="${on ? 'on' : ''}" aria-pressed="${Boolean(on)}">${label}: ${on ? 'on' : 'off'}</button>${note ? `<small class="muted">${esc(note)}</small>` : ''}`;
+  const toggle = (action, on, label, note = '') => `<div class="trow"><span><b>${label}</b>${note ? `<small>${esc(note)}</small>` : ''}</span><button data-action="${action}" class="${on ? 'on' : ''}" aria-pressed="${Boolean(on)}" aria-label="${label}: ${on ? 'on' : 'off'}">${on ? 'On' : 'Off'}</button></div>`;
   return `
     ${weatherPanel(w)}
     ${objectives ? `<h3>Objectives</h3><ul class="obj">${objectives.map((o) => `<li class="${o.ok ? 'ok' : 'bad'}">${o.ok ? '✔' : '✖'} ${esc(o.label)} <b>${esc(o.value)}</b></li>`).join('')}</ul>` : ''}
@@ -222,20 +226,17 @@ function opsPanel(w, ui) {
       <span>Revenue <b>${formatINR(k.revenue)}</b></span><span>Costs <b>${formatINR(k.costs)}</b></span>
       <span>Avg security wait <b>${w.avgWait('security').toFixed(1)} min</b></span><span>Satisfaction <b>${Math.round(w.satisfaction())}</b></span>
     </div>
-    <h3>Runway ${w.active}</h3>
-    <div class="row-actions">
-      <button data-action="switchRunway">Switch to ${other}</button>
-      ${w.runwayClosed() ? '<button data-action="reopenRunway">Reopen runway</button>' : '<button data-action="inspectRunway">Close 15 min (inspection)</button>'}
-    </div>
+    <h3>Runways</h3>
+    ${runwayControl(w)}
     <h3>Real world</h3>
-    <div class="row-actions">
-      ${toggle('liveWeather', w.liveWeather, 'Real weather', live.weather ?? 'Open-Meteo, METAR when available')}
-      <small class="muted">Real weather and Live Watch follow the real clock: they match the game exactly at 1× speed.</small>
+    <div>
+      ${toggle('liveWeather', w.liveWeather, 'Real weather', live.weather || 'Open-Meteo, METAR when available')}
       ${toggle('autoRunway', w.autoRunway, 'Runway follows wind')}
-      ${toggle('liveTraffic', live.trafficOn, 'Live Watch', live.traffic ?? 'real aircraft near Chennai (needs the proxy)')}
+      ${toggle('liveTraffic', live.trafficOn, 'Live Watch', live.traffic || 'Real aircraft near Chennai (needs the proxy)')}
       ${toggle('voice', ui.voice, 'ATC voice')}
-      ${toggle('sound', ui.sound, 'Sound', 'wind, rain, aircraft and vehicles: zoom in to hear them')}
+      ${toggle('sound', ui.sound, 'Sound', 'Wind, rain, aircraft and vehicles: zoom in to hear them')}
     </div>
+    <p class="muted fine">Real weather and Live Watch follow the real clock: they match the game exactly at 1× speed.</p>
     <h3>Ground crews</h3>
     <table class="fleet"><tr class="${w.crews.busy >= w.crews.total ? 'short' : ''}"><td>${esc(CREW.label)}</td><td>${w.crews.busy}/${w.crews.total}</td>
       <td class="buy"><button data-action="hire" data-arg="crew:5" title="${formatINR(CREW.hireCost * 5)} to hire, ${formatINR(CREW.dayCost)} per crew per day">+5</button><button data-action="hire" data-arg="crew:-1">−1</button></td></tr></table>
@@ -245,10 +246,8 @@ function opsPanel(w, ui) {
 }
 
 function logPanel(w) {
-  if (!w.log.length) return '<p class="muted">No alerts yet.</p>';
-  return `<ul class="log">${w.log.map((l) => `
-    <li class="${l.level}"><time>${hhmm(l.t)}</time> ${esc(l.text)}
-      ${l.target ? `<button data-jump='${JSON.stringify(l.target)}'>Show</button>` : ''}</li>`).join('')}</ul>`;
+  if (!w.log.length) return '<p class="empty">All quiet. Warnings and events will appear here.</p>';
+  return `<ul class="log">${w.log.map((l) => `<li class="lv-${l.level}"><time>${hhmm(l.t)}</time><span>${esc(l.text)}</span>${l.target ? `<button data-jump='${JSON.stringify(l.target)}'>Show</button>` : ''}</li>`).join('')}</ul>`;
 }
 
 // ---- selection panel ---------------------------------------------------------------------------
@@ -256,7 +255,7 @@ function logPanel(w) {
 export function selectionPanel(w, sel, ui = null) {
   if (sel.type === 'flight') return flightPanel(w, sel.id, ui);
   if (sel.type === 'stand') return standPanel(w, sel.id);
-  if (sel.type === 'runway') return runwayPanel(w);
+  if (sel.type === 'runway') return runwayPanelFor(w, sel.ref);
   if (sel.type === 'info') return `<button class="x" data-close aria-label="Close">×</button><h2>${esc(sel.info.title)}</h2>${sel.info.lines.map((l) => `<p>${esc(l)}</p>`).join('')}`;
   return '';
 }
@@ -268,12 +267,14 @@ function flightPanel(w, id, ui) {
   const canCancel = ['scheduled', 'holding', 'inbound'].includes(f.phase);
   return `
     <button class="x" data-close aria-label="Close">×</button>
-    <h2 class="fh">${badge(f.airline, 'lg')} ${esc(f.arrNo)} / ${esc(f.depNo)}</h2>
+    <h2 class="fh">${badge(f.airline, 'lg')} ${esc(f.arrNo)}${f.depNo !== f.arrNo ? ` / ${esc(f.depNo)}` : ''}</h2>
     <p class="sub"><b>${esc(nameOf(f))}</b> · ${esc(f.intl ? 'international' : 'domestic')}${f.service === 'cargo' ? ' · cargo' : f.service === 'ga' ? ' · general aviation' : ''}</p>
-    <p class="muted">${airlineLine(f.airline)}</p>
+    <p class="sub">${esc(AIRCRAFT_TYPES[f.type].name)} · ${esc(f.registration ?? registration(f.airline, f.id))}</p>
+    <p class="routeline">${esc(f.from)} <i>→</i> MAA <i>→</i> ${esc(f.to)}</p>
     ${flightDetails(w, f, ui)}
+    <p class="muted fine">${airlineLine(f.airline)}</p>
     <div class="row-actions">
-      <button data-action="follow" data-arg="${f.id}">🎥 Follow</button>
+      <button data-action="follow" data-arg="${f.id}">Follow</button>
       ${!f.priority && !['departed', 'diverted', 'cancelled'].includes(f.phase) ? `<button data-action="prioritise" data-arg="${f.id}" title="₹50,000: faster turnaround, first in the departure queue">⚡ Prioritise</button>` : ''}
       ${canChangeStand ? `<button data-action="pickStand" data-arg="${f.id}">Change stand</button>` : ''}
       ${canCancel ? `<button data-action="cancelFlight" data-arg="${f.id}" class="danger">Cancel</button>` : ''}
@@ -296,25 +297,6 @@ function standPanel(w, id) {
     ${nextFlight ? `<p>Next: ${badge(nextFlight.airline, 'sm')} ${esc(nextFlight.arrNo)} (${nextFlight.type}) around ${hhmm(next.from + 300)}</p>` : ''}
     <p class="muted">Fits: ${sizes.length === Object.keys(AIRCRAFT_TYPES).length ? `all ${sizes.length} aircraft types` : sizes.length ? sizes.join(', ') : 'nothing (no mapped apron here)'}</p>
     <div class="row-actions"><button data-action="toggleStand" data-arg="${s.id}">${s.closed ? 'Reopen stand' : 'Close stand'}</button></div>`;
-}
-
-function runwayPanel(w) {
-  const { head, cross } = w.windComponents();
-  const arrivals = w.flights.filter((f) => ['inbound', 'final'].includes(f.phase)).sort((a, b) => a.slot - b.slot).slice(0, 5);
-  const queue = w.flights.filter((f) => f.phase === 'holdShort').length;
-  const closure = w.closures[0];
-  const other = Object.keys(w.frame.ends).find((d) => d !== w.active);
-  return `
-    <button class="x" data-close aria-label="Close">×</button>
-    <h2>Runway 07/25 · ${w.active} in use</h2>
-    <p class="sub">3,661 m × 45 m · ILS CAT I both ends</p>
-    <p>Wind ${String(w.wind.from).padStart(3, '0')}° at ${w.wind.kt} kt · headwind ${Math.round(head)} kt · crosswind ${Math.round(cross)} kt</p>
-    ${closure ? `<p class="warn">Closed until ${hhmm(closure.to)}: ${esc(closure.reason)}</p>` : ''}
-    <p>Departure queue: <b>${queue}</b> · Next landings: ${arrivals.map((f) => `${esc(f.arrNo)} ${hhmm(f.slot)}`).join(', ') || 'none'}</p>
-    <div class="row-actions">
-      <button data-action="switchRunway">Switch to ${other}</button>
-      ${closure ? '<button data-action="reopenRunway">Reopen</button>' : '<button data-action="inspectRunway">Close 15 min</button>'}
-    </div>`;
 }
 
 export { TERMINAL_DEFS, PROC_ORDER };

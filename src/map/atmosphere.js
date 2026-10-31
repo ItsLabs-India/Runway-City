@@ -55,7 +55,8 @@ const hash = (x, y, s) => {
 // Which kinds of vehicle flash an amber beacon.
 const BEACONS = new Set(['tug', 'pushback', 'fuel', 'fireTender', 'followMe', 'beltLoader', 'catering']);
 // Eastern end distances of the approach lights per runway end (eAIP, metres).
-const APPROACH = { '07': 900, 25: 510 };
+// 30 has none: its extended centreline reaches runway 07/25 only 85 m past the threshold.
+const APPROACH = { '07': 900, 25: 510, 30: 0 };
 
 export class Atmosphere {
   constructor() {
@@ -348,7 +349,7 @@ export class Atmosphere {
         ctx.globalAlpha = k * (0.35 + 0.13 * L.rwyStep);
         ctx.strokeStyle = '#fff1cf';
         ctx.lineWidth = dot;
-        ctx.stroke(data.lights.runway);
+        for (const R of sim.runways) if (R.mode !== 'off') ctx.stroke(data.lights.byRunway.get(R.ref));
       }
       if (L.taxi) {
         ctx.globalAlpha = k * 0.9;
@@ -368,10 +369,11 @@ export class Atmosphere {
     }
 
     // Approach lights and threshold bars for the runway in use, with the flashing "rabbit".
-    if (L.rwyStep > 0) {
-      const des = sim.active;
-      const frame = data.frames.find((f) => des in f.ends || String(des) in f.ends);
-      if (frame) {
+    for (const R of L.rwyStep > 0 ? sim.runways : []) {
+      if (R.mode === 'off') continue;
+      const des = R.active;
+      const frame = R.frame;
+      {
         const ends = Object.entries(frame.ends);
         const me = ends.find(([name]) => String(name) === String(des)) ?? ends[0];
         const other = ends.find(([name]) => name !== me[0]) ?? ends[1];

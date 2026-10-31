@@ -156,6 +156,64 @@ for (const r of surroundings.filter((e) => e.type === 'relation' && e.tags?.natu
   }
 }
 
+// Airport grounds beyond the OSM boundary (a game decision, not real data): north-west of the runway 12
+// end, so the approach has airport land under it. The curve leaves the OSM boundary at its first point and
+// rejoins it at its last, and keeps just south of Manapakkam Main Road. Minor streets inside are removed.
+const GROUND_EXTENSIONS = [
+  [[-1434, -1573], [-1562, -1693], [-1718, -1782], [-1896, -1835], [-2030, -1842], [-2100, -1820], [-2160, -1778], [-2240, -1765], [-2290, -1750], [-2275, -1705], [-2196, -1605], [-2151, -1505], [-2149, -1427], [-2062, -1405], [-2009, -1410]],
+];
+const KEEP_ROADS = new Set(['motorway', 'trunk', 'primary', 'secondary']);
+
+function smoothCurve(points, rounds = 3) {
+  let pts = points;
+  for (let k = 0; k < rounds; k++) {
+    const next = [pts[0]];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [a, b] = [pts[i], pts[i + 1]];
+      next.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25], [a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
+    }
+    next.push(pts.at(-1));
+    pts = next;
+  }
+  return pts.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
+}
+
+const insidePolygon = ([x, y], poly) => {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+};
+
+for (const curve of GROUND_EXTENSIONS) {
+  const ring = map.aerodrome;
+  const nearest = (p) => ring.reduce((best, q, i) => (Math.hypot(q[0] - p[0], q[1] - p[1]) < Math.hypot(ring[best][0] - p[0], ring[best][1] - p[1]) ? i : best), 0);
+  const from = nearest(curve[0]);
+  const to = nearest(curve.at(-1));
+  const smooth = smoothCurve([ring[from], ...curve.slice(1, -1), ring[to]]);
+  const added = [...smooth, ...ring.slice(from + 1, to).reverse()];
+  map.aerodrome = [...ring.slice(0, from), ...smooth, ...ring.slice(to + 1)];
+  const roads = [];
+  for (const r of map.roads) {
+    if (KEEP_ROADS.has(r.kind) || !r.points.some((p) => insidePolygon(p, added))) {
+      roads.push(r);
+      continue;
+    }
+    let run = [];
+    for (const p of r.points) {
+      if (insidePolygon(p, added)) {
+        if (run.length > 1) roads.push({ ...r, points: run });
+        run = [];
+      } else run.push(p);
+    }
+    if (run.length > 1) roads.push({ ...r, points: run });
+  }
+  map.roads = roads;
+}
+
 const out = new URL('../public/data/maa-map.json', import.meta.url);
 const json = JSON.stringify(map);
 await writeFile(out, json);

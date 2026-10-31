@@ -7,8 +7,10 @@ import { weatherChip, reportWeather } from './weatherUi.js';
 import { reportFinance } from './financeUi.js';
 import { SCENARIOS } from '../sim/scenarios.js';
 import { PERKS, PROCESSES, fmtCr } from '../sim/terminal.js';
-import { panel, selectionPanel, clock, esc } from './panels.js';
+import { panel, selectionPanel, hhmm, esc } from './panels.js';
+import { setSectionOpen } from './flightDetails.js';
 
+const clockText = (t) => `Day ${Math.floor(t / 86400) + 1} · ${hhmm(t)} IST`;
 const SPEEDS = [0, 1, 3, 10, 30, 60];
 // [id, button label, key, panel title]
 const TABS = [['board', 'Flights', 'F', 'Flights'], ['term', 'Terminals', 'T', 'Terminals'], ['proj', 'Projects', 'P', 'Projects'], ['ops', 'Ops', 'O', 'Operations'], ['fin', 'Finance', 'I', 'Finance and management'], ['log', 'Alerts', 'L', 'Alerts']];
@@ -44,15 +46,15 @@ export function createHud(root, cb) {
         ${TABS.map(([id, label, key, title]) => `<button data-tab="${id}" title="${title} (${key})">${label}${id === 'log' ? ' <b data-alerts></b>' : ''}</button>`).join('')}
         <button data-action="menu" aria-label="Menu" title="Menu: scenarios, save, load">☰</button>
       </div>
-      <div class="group" role="group" aria-label="Map">
-        <button data-zoom="1.5" aria-label="Zoom in" title="Zoom in (+)">+</button>
-        <button data-zoom="0.667" aria-label="Zoom out" title="Zoom out (−)">−</button>
-        <button data-home aria-label="Show the whole airport" title="Whole airport">⌂</button>
-        <button data-action="sound" data-sound aria-label="Sound" aria-pressed="false" title="Sound on / off (M). Zoom in to hear aircraft and vehicles">🔇</button>
-      </div>
     </header>
     <aside class="panel" data-panel hidden></aside>
     <aside class="info" data-info hidden></aside>
+    <div class="mapctl" role="group" aria-label="Map">
+      <button data-zoom="1.5" aria-label="Zoom in" title="Zoom in (+)">+</button>
+      <button data-zoom="0.667" aria-label="Zoom out" title="Zoom out (−)">−</button>
+      <button data-home aria-label="Show the whole airport" title="Whole airport">⌂</button>
+      <button data-action="sound" data-sound aria-label="Sound" aria-pressed="false" title="Sound on / off (M). Zoom in to hear aircraft and vehicles">🔇</button>
+    </div>
     <div class="banner" data-banner hidden></div>
     <div class="toasts" data-toasts aria-live="polite"></div>
     <div class="modal" data-modal hidden role="dialog" aria-modal="true"></div>
@@ -66,6 +68,9 @@ export function createHud(root, cb) {
   let lastInfo = '';
 
   root.addEventListener('click', (e) => {
+    // A flight-card section stays as the player left it while the card refreshes.
+    const sum = e.target.closest('summary[data-sec]');
+    if (sum) setSectionOpen(sum.dataset.sec, !sum.parentElement.open);
     const b = e.target.closest('button, [data-row]');
     if (!b || b.disabled) return;
     const d = b.dataset;
@@ -146,27 +151,39 @@ export function createHud(root, cb) {
       const m = $('[data-modal]');
       m.hidden = false;
       m.dataset.kind = 'menu';
-      const card = (id, s, extra = '') => `<button class="card ${id === current ? 'current' : ''}" data-pick="${id}"><strong>${extra}${esc(s.name)}</strong><span>${esc(s.brief)}</span>${s.objectives ? `<em>Goal: ${Math.round(s.objectives.otp * 100)} % on time, ≤ ${s.objectives.maxDiversions} diversions${s.objectives.projects ? ', build ' + s.objectives.projects.length + ' projects' : ''}</em>` : '<em>No objectives</em>'}</button>`;
+      const goal = (s) => (s.objectives ? `${Math.round(s.objectives.otp * 100)} % on time · at most ${s.objectives.maxDiversions} diversion${s.objectives.maxDiversions === 1 ? '' : 's'}${s.objectives.projects ? ` · build ${s.objectives.projects.length} projects` : ''}` : 'No objectives, unlimited money');
+      const card = (id, s, { feature = false, tag = '' } = {}) => `<button class="card ${feature ? 'feature' : ''} ${id === current ? 'current' : ''}" data-pick="${id}"><strong>${esc(s.name)}${tag}${id === current && canClose ? '<i class="tag ok">Playing</i>' : ''}</strong><span title="${esc(s.brief)}">${esc(s.brief)}</span><em>${goal(s)}</em></button>`;
+      const featured = [['normal', '<i class="tag">Start here</i>'], ...(daily && daily !== 'normal' ? [[daily, '<i class="tag now">Today\'s challenge</i>']] : [])];
+      const rest = Object.entries(SCENARIOS).filter(([id]) => !featured.some(([f]) => f === id));
+      const opt = (action, value, label, cur, title) => `<button data-action="${action}" data-arg="${value}" class="${cur === value ? 'on' : ''}" aria-pressed="${cur === value}" title="${title}">${label}</button>`;
       m.innerHTML = `
         <div class="sheet" role="document">
           ${canClose ? '<button class="x" data-action="closeMenu" aria-label="Close menu">×</button>' : ''}
           <h1>Runway City <span>MAA</span></h1>
-          <p class="lead">Run Chennai airport's real layout through a real-feeling day: every aircraft lands, taxis, is serviced and departs, and every passenger queues. You decide the stands, staff and expansion.</p>
-          ${saved ? `<button class="card continue" data-action="continue"><strong>Continue your game</strong><span>${esc(saved.scenario)} · ${esc(clock(saved.t))} · ${formatINR(saved.money)}</span></button>` : ''}
-          <div class="cards">
-            ${daily ? card(daily, SCENARIOS[daily], '📅 Daily challenge: ') : ''}
-            ${Object.entries(SCENARIOS).map(([id, s]) => card(id, s)).join('')}
+          <p class="lead">Run Chennai airport's real layout through a day: every aircraft lands, taxis, is serviced and departs, and every passenger queues. You decide the stands, staff and expansion.</p>
+          ${saved ? `<button class="card continue" data-action="continue"><strong>Continue your game</strong><span>${esc(saved.scenario)} · ${esc(clockText(saved.t))} · ${formatINR(saved.money)}</span></button>` : ''}
+          <div class="cards feature">${featured.map(([id, tag]) => card(id, SCENARIOS[id], { feature: true, tag })).join('')}</div>
+          <h3>More scenarios</h3>
+          <div class="cards more">${rest.map(([id, s]) => card(id, s)).join('')}</div>
+          <div class="menu-foot">
+            <div>
+              <h3>Options</h3>
+              <div class="ctl"><span class="lbl">Weather</span><span class="seg" role="group" aria-label="Weather">${opt('weatherMode', 'random', 'Random', weatherMode, 'The season decides rain, fog and storms')}${opt('weatherMode', 'calm', 'Calm', weatherMode, 'Clear skies only')}</span></div>
+              <div class="ctl"><span class="lbl">Traffic on a normal day</span><span class="seg" role="group" aria-label="Traffic on a normal day">${opt('traffic', 0, 'Standard', traffic, 'The standard schedule. Applies to the next normal day you start.')}${opt('traffic', 0.5, '+50 %', traffic, '50 % more flights than standard. Applies to the next normal day you start.')}</span></div>
+            </div>
+            <div>
+              <h3>Saved games</h3>
+              <div class="row-actions">
+                ${canClose ? '<button data-action="saveNow">Save now</button>' : ''}
+                ${canClose ? '<button data-action="exportSave">Export file</button>' : ''}
+                <label class="btn">Import file<input type="file" accept=".json,application/json" data-import hidden></label>
+              </div>
+            </div>
           </div>
-          <div class="row-actions">
-            <button data-action="weatherMode" data-arg="${weatherMode === 'calm' ? 'random' : 'calm'}" title="Random: the season decides rain, fog and storms. Calm: clear skies only.">Weather: ${weatherMode === 'calm' ? 'calm' : 'random'}</button>
-            <span class="seg" role="group" aria-label="Traffic on a normal day">${[[0, 'Standard'], [0.5, '+50 %']].map(([v, label]) => `<button data-action="traffic" data-arg="${v}" class="${traffic === v ? 'on' : ''}" aria-pressed="${traffic === v}" title="Flights on a normal day: ${v ? `${label} more than standard` : 'the standard schedule'}. Applies to the next normal day you start.">${label}</button>`).join('')}</span><small class="muted">Traffic, normal day</small>
-            ${canClose ? '<button data-action="saveNow">Save now</button>' : ''}
-            ${canClose ? '<button data-action="exportSave">Export save file</button>' : ''}
-            <label class="btn">Import save file<input type="file" accept=".json,application/json" data-import hidden></label>
-          </div>
-          <p class="muted keys">Keys: Space pause · 1–5 speed · F T P O I L panels · H help · Esc close <button data-action="help">Keys and tips</button></p>
+          <p class="keys">Space pauses · 1–5 set the speed · F T P O I L open panels <button data-action="help">Keys and tips</button></p>
         </div>`;
-      m.querySelector('button, input')?.focus();
+      m.querySelector('.sheet').setAttribute('tabindex', '-1');
+      m.querySelector('.sheet').focus();
     },
 
     showHelp() {
@@ -195,29 +212,35 @@ export function createHud(root, cb) {
       m.hidden = false;
       m.dataset.kind = 'report';
       const wait = (k) => (r.waits[k] > 0.05 ? `${r.waits[k].toFixed(1)} min` : '–');
+      const otp = Math.round(r.otp * 100);
+      const lost = r.diversions + r.cancellations;
+      const [word, tone] = otp >= 90 && !lost ? ['An excellent day', 'ok'] : otp >= 75 ? ['A solid day', 'ok'] : otp >= 55 ? ['A difficult day', 'mid'] : ['A rough day', 'bad'];
+      const toneOf = (v, good, ok) => (v >= good ? 'ok' : v >= ok ? 'mid' : 'bad');
+      const tile = (label, value, cls = '', note = '') => `<div class="tile ${cls}"><small>${label}</small><b>${value}</b>${note ? `<span>${note}</span>` : ''}</div>`;
+      // A report section: its title is the summary, so the heading inside is dropped.
+      const part = (title, html, open = false) => (html ? `<details class="rsec" ${open ? 'open' : ''}><summary>${title}</summary>${html.replace(/^\s*<h3>.*?<\/h3>/s, '')}</details>` : '');
       m.innerHTML = `
-        <div class="sheet" role="document">
+        <div class="sheet" role="document" tabindex="-1">
           <h1>Day ${r.day} report <span>${esc(r.date)}</span></h1>
-          <p class="lead">${esc(r.scenario)}</p>
-          <div class="kpis big">
-            <span>Departures <b>${r.departures}</b></span><span>On time <b>${Math.round(r.otp * 100)} %</b></span>
-            <span>Average delay <b>${Math.round(r.avgDelayMin)} min</b></span><span>Satisfaction <b>${Math.round(r.satisfaction)}</b></span>
-            <span>Passengers <b>${(r.paxOut + r.paxIn).toLocaleString('en-IN')}</b></span><span>Missed flights <b>${r.missedPax}</b></span>
-            <span>Diversions <b>${r.diversions}</b></span><span>Cancellations <b>${r.cancellations}</b></span>
-            <span>Revenue <b>${fmtCr(r.revenue)}</b></span><span>Costs <b>${fmtCr(r.costs)}</b></span>
-            <span>Profit <b class="${r.profit >= 0 ? 'ok' : 'bad'}">${fmtCr(r.profit)}</b></span><span>Retail income <b>${fmtCr(r.retail)}</b></span>
+          <p class="verdict"><b class="${tone}">${word}.</b> ${esc(r.scenario)}: ${r.departures} departures${lost ? `, ${r.diversions} diverted, ${r.cancellations} cancelled` : ', nothing diverted or cancelled'}.</p>
+          <div class="tiles">
+            ${tile('On time', `${otp} %`, toneOf(otp, 80, 60), `average delay ${Math.round(r.avgDelayMin)} min`)}
+            ${tile('Profit', fmtCr(r.profit), r.profit >= 0 ? 'ok' : 'bad', `${fmtCr(r.revenue)} in, ${fmtCr(r.costs)} out`)}
+            ${tile('Satisfaction', Math.round(r.satisfaction), toneOf(r.satisfaction, 70, 50))}
+            ${tile('Passengers', (r.paxOut + r.paxIn).toLocaleString('en-IN'), r.missedPax > 50 ? 'mid' : '', `${r.missedPax} missed their flight`)}
           </div>
-          <h3>Average waits</h3>
-          <div class="kpis"><span>${PROCESSES.checkin.label} <b>${wait('checkin')}</b></span><span>${PROCESSES.security.label} <b>${wait('security')}</b></span><span>${PROCESSES.immigration.label} <b>${wait('immigration')}</b></span><span>${PROCESSES.arrImm.label} <b>${wait('arrImm')}</b></span><span>${PROCESSES.reclaim.label} <b>${wait('reclaim')}</b></span></div>
-          ${r.causes.length ? `<h3>Main causes of delay</h3><ul class="obj">${r.causes.map(([c, n]) => `<li>${esc(c)} <b>${n}</b></li>`).join('')}</ul>` : ''}
-          ${reportFinance(r.finance)}
-          ${reportWeather(r.weather)}
-          ${reportAirlines(r.airlines ?? [])}
           <h3>Adopt one policy</h3>
           <div class="cards">${r.offer.map((id) => `<button class="card" data-action="perk" data-arg="${id}"><strong>${esc(PERKS[id].label)}</strong><span>${esc(PERKS[id].text)}</span></button>`).join('')}</div>
-          <div class="row-actions"><button data-action="perk" data-arg="">Continue without a policy</button><button data-action="copyResult">Copy result to share</button></div>
+          <h3>The day in detail</h3>
+          ${part('Waits and delays', `<div class="kpis"><span>${PROCESSES.checkin.label} <b>${wait('checkin')}</b></span><span>${PROCESSES.security.label} <b>${wait('security')}</b></span><span>${PROCESSES.immigration.label} <b>${wait('immigration')}</b></span><span>${PROCESSES.arrImm.label} <b>${wait('arrImm')}</b></span><span>${PROCESSES.reclaim.label} <b>${wait('reclaim')}</b></span></div>
+            ${r.causes.length ? `<h3>Main causes of delay</h3><ul class="obj">${r.causes.map(([c, n]) => `<li>${esc(c)} <b>${n}</b></li>`).join('')}</ul>` : ''}
+            ${r.runways ? `<p class="muted">Runways: ${r.runways.map((x) => `${esc(x.ref)} ${x.landings} landings, ${x.takeoffs} take-offs`).join(' · ')}</p>` : ''}`, true)}
+          ${part('Money', `<div class="kpis"><span>Revenue <b>${fmtCr(r.revenue)}</b></span><span>Costs <b>${fmtCr(r.costs)}</b></span><span>Retail income <b>${fmtCr(r.retail)}</b></span></div>${reportFinance(r.finance)}`)}
+          ${part('Weather', reportWeather(r.weather))}
+          ${part('Airlines', reportAirlines(r.airlines ?? []))}
+          <div class="sticky-foot"><button data-action="perk" data-arg="">Continue without a policy</button><button data-action="copyResult">Copy result to share</button></div>
         </div>`;
-      m.querySelector('button')?.focus();
+      m.querySelector('.sheet').focus();
     },
 
     hideModal() {
@@ -232,16 +255,19 @@ export function createHud(root, cb) {
     },
 
     update(world, selection, speed, ui) {
-      $('[data-clock]').textContent = clock(world.t).replace(/([0-9]{2}:[0-9]{2}):[0-9]{2}/, '$1'); // minutes are enough at 3x and faster
+      $('[data-clock]').innerHTML = `<b>${hhmm(world.t)}</b><small>Day ${Math.floor(world.t / 86400) + 1} · IST</small>`; // minutes are enough at 3x and faster
       const k = world.kpi;
       const otp = k.departures ? Math.round((k.onTime / k.departures) * 100) : 100;
-      const closed = world.runwayClosed();
+      const inUse = world.runways.filter((R) => R.mode !== 'off');
+      const closed = inUse.some((R) => world.runwayClosed(world.t, R.ref));
+      const sat = Math.round(world.satisfaction());
+      // A figure only takes a colour when it needs the player's attention.
       $('[data-stats]').innerHTML = `
-        <button class="stat money ${world.money < 0 ? 'bad' : ''}" data-action="openTab" data-arg="fin" title="Cash. Open Finance (I)">${formatINR(world.money)}</button>
-        <button class="stat" data-action="openTab" data-arg="board" title="On-time departures (within 15 min). Open the flight board (F)">⏱ ${otp}%</button>
-        <button class="stat ${world.satisfaction() < 50 ? 'bad' : ''}" data-action="openTab" data-arg="term" title="Passenger satisfaction: flights and queues. Open Terminals (T)">☺ ${Math.round(world.satisfaction())}</button>
-        <button class="stat ${closed ? 'bad' : ''}" data-jump='{"runway":true}' title="Active runway. Show the runway">RWY ${world.active}${closed ? ' CLOSED' : ''}</button>
-        <span title="Wind${world.liveWeather ? ' (real)' : ''}${world.wind.gust ? `, gusting ${world.wind.gust} kt` : ''}">↘ ${String(world.wind.from).padStart(3, '0')}°/${world.wind.kt}${world.wind.gust ? `G${world.wind.gust}` : ''} kt</span>
+        <button class="stat money ${world.money < 0 ? 'bad' : ''}" data-action="openTab" data-arg="fin" title="Cash. Open Finance (I)"><small>Cash</small><b>${formatINR(world.money)}</b></button>
+        <button class="stat ${otp < 60 ? 'bad' : otp < 80 ? 'mid' : ''}" data-action="openTab" data-arg="board" title="On-time departures (within 15 min). Open the flight board (F)"><small>On time</small><b>${otp}%</b></button>
+        <button class="stat ${sat < 50 ? 'bad' : sat < 70 ? 'mid' : ''}" data-action="openTab" data-arg="term" title="Passenger satisfaction: flights and queues. Open Terminals (T)"><small>Satisfaction</small><b>${sat}</b></button>
+        <button class="stat ${closed ? 'bad' : ''}" data-jump='{"runway":true}' title="Runways in use. Show the runway control"><small>RWY</small><b>${inUse.map((R) => R.active).join(' · ')}${closed ? ' closed' : ''}</b></button>
+        <span class="wind" title="Wind${world.liveWeather ? ' (real)' : ''}${world.wind.gust ? `, gusting ${world.wind.gust} kt` : ''}"><small>Wind</small><b>${String(world.wind.from).padStart(3, '0')}° ${world.wind.kt}${world.wind.gust ? `G${world.wind.gust}` : ''} kt</b></span>
         ${weatherChip(world)}`;
       const fresh = world.log.length - seenAlerts;
       $('[data-alerts]').textContent = fresh > 0 && tab !== 'log' ? fresh : '';

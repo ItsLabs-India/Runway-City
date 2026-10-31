@@ -43,7 +43,7 @@ await page.waitForFunction(() => window.__runway?.world, null, { timeout: 30000 
 check('game boots without a menu when ?scenario is given', await W(() => window.__runway.hud.modalKind === null));
 
 // ---- tabs and keyboard shortcuts ----------------------------------------------------------------
-for (const [key, text] of [['f', 'Arrivals'], ['t', 'Upgrade planner'], ['p', 'Terminal 3'], ['o', 'Ground equipment'], ['l', '']]) {
+for (const [key, text] of [['f', 'Arrivals'], ['t', 'Upgrade every terminal'], ['p', 'Terminal 3'], ['o', 'Ground equipment'], ['l', '']]) {
   await page.keyboard.press(key);
   await settle(350);
   const html = await W(() => document.querySelector('[data-panel]').innerText);
@@ -133,21 +133,44 @@ check('clicking Terminal 1 on the map opens the Terminals panel', await W(() => 
 await page.keyboard.press('f');
 await W(() => window.__runway.world.update(1200));
 await settle(500);
-const rowId = await W(() => window.__runway.world.flights.find((f) => f.phase === 'atStand' && !f.service)?.id); // a passenger flight
+// A parked passenger flight that is on the board (the board lists only the next departures).
+const rowId = await W(() => {
+  const on = new Set([...document.querySelectorAll('[data-panel] [data-row]')].map((r) => Number(r.dataset.row)));
+  return window.__runway.world.flights.find((f) => f.phase === 'atStand' && !f.service && on.has(f.id))?.id;
+});
 await page.click(`[data-row="${rowId}"]`);
 await settle();
 check('board row selects the flight', (await W(() => document.querySelector('[data-info]').innerText)).toLowerCase().includes('passengers'));
-check('flight details come in order: status, live data, route, timeline, aircraft, stand, passengers, conditions', await W(() => {
+check('flight details come in order: status, route, timeline, stand, passengers, then live data, aircraft, conditions', await W(() => {
   const heads = [...document.querySelectorAll('[data-info] .fd-sec h4')].map((h) => h.innerText.toLowerCase());
-  return heads.join('|') === 'status|live data|route|timeline|aircraft|stand and turnaround|passengers|conditions';
+  return heads.join('|') === 'status|route|timeline|stand and turnaround|passengers|live data|aircraft|conditions';
 }));
 check('the timeline lists the steps of the flight, done steps first', await W(() => {
   const items = [...document.querySelectorAll('[data-info] .tline li')].map((li) => li.className);
   const firstOpen = items.findIndex((c) => c !== 'done');
   return items.length >= 7 && items.slice(0, firstOpen).every((c) => c === 'done') && items.slice(firstOpen).every((c) => c !== 'done');
 }));
-check('live data shows four instruments, ground speed and the altimeter setting', await W(() => document.querySelectorAll('[data-info] .inst-row .inst').length === 4 && /ground speed/i.test(document.querySelector('[data-info]').innerText) && /QNH/.test(document.querySelector('[data-info]').innerText)));
+check('live data shows four instruments, ground speed and the altimeter setting', await W(() => document.querySelectorAll('[data-info] .inst-row .inst').length === 4 && /ground speed/i.test(document.querySelector('[data-info]').textContent) && /QNH/.test(document.querySelector('[data-info]').textContent)));
 check('the flight card shows a registration and the route distance', await W(() => /[A-Z0-9]{1,3}-[A-Z]{2,4}/.test(document.querySelector('[data-info]').innerText) && /[0-9] km/.test(document.querySelector('[data-info]').innerText)));
+// ---- visual hierarchy: reference sections fold, and stay as the player left them ----------------------------
+await page.click('[data-info] summary[data-sec="Aircraft"]');
+await W(() => window.__runway.setSpeed(3));
+await page.waitForTimeout(1200); // several refreshes of the card
+check('a folded section stays open while the card refreshes', await W(() => document.querySelector('[data-info] summary[data-sec="Aircraft"]').parentElement.open));
+await page.click('[data-info] summary[data-sec="Aircraft"]');
+await page.waitForTimeout(600);
+check('and stays closed after closing it', await W(() => !document.querySelector('[data-info] summary[data-sec="Aircraft"]').parentElement.open));
+await W(() => window.__runway.setSpeed(0));
+check('the flight actions stay in view while the card scrolls', await W(() => {
+  const card = document.querySelector('[data-info]');
+  card.scrollTop = card.scrollHeight / 2;
+  const r = card.querySelector(':scope > .row-actions').getBoundingClientRect();
+  const c = card.getBoundingClientRect();
+  card.scrollTop = 0;
+  return r.bottom <= c.bottom + 1 && r.top >= c.top;
+}));
+check('panels fit their width (nothing clipped sideways)', await W(() => { const p = document.querySelector('[data-panel]'); return p.scrollWidth <= p.clientWidth + 1; }));
+check('the top bar stays on one row at desktop width', await W(() => document.querySelector('.bar').getBoundingClientRect().height < 60));
 const mBefore = await W(() => window.__runway.world.money);
 await click('[data-action="prioritise"]');
 check('prioritise charges ₹50,000', Math.abs(mBefore - (await W(() => window.__runway.world.money)) - 5e4) < 100);
@@ -206,6 +229,52 @@ await W(() => {
   w.update(1300); // the lightning rule lifts ten minutes after the last strike
 });
 check('the ramp reopens after the storm', await W(() => window.__runway.world.rampClosed === false));
+
+// ---- runway control --------------------------------------------------------------------------------
+const topBar = () => W(() => document.querySelector('[data-stats]').innerText);
+check('both runways are listed in the top bar by default', /RWY\s+\d+ · \d+/.test(await topBar()), (await topBar()).match(/RWY[^\n]*/)?.[0]);
+check('Operations has a plan selector and a card per runway', await W(() => document.querySelectorAll('.rwplans button').length === 4 && document.querySelectorAll('.rwcard').length === 2));
+check('07/25 offers no "not in use" role', await W(() => !document.querySelector('[data-action="runwayMode"][data-arg="07/25:off"]') && Boolean(document.querySelector('[data-action="runwayMode"][data-arg="12/30:off"]'))));
+await page.screenshot({ path: `${out}/runway-control.png` });
+await click('[data-action="runwayPlan"][data-arg="single"]');
+await settle();
+check('plan "single" takes 12/30 out of use', await W(() => window.__runway.world.second.mode === 'off' && window.__runway.world.runwayPlan === 'single'));
+check('the top bar then lists one runway', !/RWY \d+ · \d+/.test(await topBar()));
+await click('[data-action="runwayPlan"][data-arg="dualMixed"]');
+await settle();
+check('plan "dual mixed" uses both for everything', await W(() => window.__runway.world.runways.every((R) => R.mode === 'both')));
+await click('[data-action="runwayMode"][data-arg="12/30:arr"]');
+await settle();
+check('a role button sets that runway', await W(() => window.__runway.world.second.mode === 'arr'));
+const dir0 = await W(() => window.__runway.world.second.active);
+for (let i = 0; i < 40 && (await W(() => window.__runway.world.second.active)) === dir0; i++) {
+  await W(() => document.querySelector('[data-action="switchRunway"][data-arg="12/30"]').click());
+  await W(() => window.__runway.world.update(30));
+}
+check('the direction button turns 12/30 round', (await W(() => window.__runway.world.second.active)) !== dir0);
+await settle();
+await click('[data-action="inspectRunway"][data-arg="12/30"]');
+await settle();
+check('12/30 can be closed for inspection on its own', await W(() => { const w = window.__runway.world; return w.runwayClosed(w.t, '12/30') && !w.runwayClosed(w.t, '07/25'); }));
+await click('[data-action="reopenRunway"][data-arg="12/30"]');
+await settle();
+check('and reopened', await W(() => { const w = window.__runway.world; return !w.runwayClosed(w.t, '12/30'); }));
+await click('[data-action="runwayPlan"][data-arg="dualLand"]');
+await settle();
+const rwyPoint = await W(() => {
+  const { world: w, camera } = window.__runway;
+  const [a, b] = Object.values(w.second.frame.ends);
+  // A quarter of the way along stays clear of the crossing and of any traffic at the threshold.
+  const x = a[0] + (b[0] - a[0]) * 0.25;
+  const y = a[1] + (b[1] - a[1]) * 0.25;
+  camera.setView({ x, y, scale: 0.8 });
+  return camera.worldToScreen(x, y);
+});
+await settle();
+await page.mouse.click(rwyPoint[0], rwyPoint[1]);
+await settle();
+check('clicking 12/30 on the map opens its own card', await W(() => document.body.innerText.includes('Runway 12/30') && Boolean(document.querySelector('.rwcard'))));
+await page.keyboard.press('Escape');
 
 // ---- finance, top-bar shortcuts, panel header, help --------------------------------------------------
 await page.click('.stats .stat.money');
@@ -266,8 +335,8 @@ await page.waitForSelector('[data-modal]:not([hidden]) h1', { timeout: 8000 });
 if (process.env.DEBUG_GRIDLOCK) console.log(await W(() => {
   const w = window.__runway.world;
   const hh = (x) => `${String(Math.floor((x % 86400) / 3600)).padStart(2, '0')}:${String(Math.floor((x % 3600) / 60)).padStart(2, '0')}`;
-  const ru = w.flights.find((f) => f.id === w.runwayUser);
-  const lines = [`t ${hh(w.t)} runwayUser ${w.runwayUser} ${ru ? ru.depNo + ' ' + ru.phase + ' s ' + ru.s?.toFixed(0) + ' wait ' + ru.waiting : ''} closed ${w.runwayClosed()}`];
+  const ru = w.flights.find((f) => f.id === w.main.user);
+  const lines = [`t ${hh(w.t)} runwayUser ${w.main.user} ${ru ? ru.depNo + ' ' + ru.phase + ' s ' + ru.s?.toFixed(0) + ' wait ' + ru.waiting : ''} closed ${w.runwayClosed()}`];
   for (const f of w.flights.filter((x) => ['taxiOut', 'holdShort', 'taxiIn', 'lineUp', 'landing', 'pushback'].includes(x.phase))) lines.push(`${f.id} ${f.phase} ${f.depNo} v${f.speed.toFixed(1)} s${f.s.toFixed(0)}/${f.limit?.toFixed(0)} wait=${f.waiting} blockedBy=${f.blockedBy} waitFor=${f.waitFor} blockedFor=${f.blockedFor?.toFixed(0)} giveWay=${f.giveWayFor?.toFixed(0)} ghost=${f.ghostUntil > w.t}`);
   lines.push('overrides ' + JSON.stringify((w.overrides ?? []).slice(-6)));
   return lines.join(String.fromCharCode(10));

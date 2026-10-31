@@ -7,7 +7,8 @@
 import { readFile } from 'node:fs/promises';
 import { World } from '../src/sim/world.js';
 import { Weather, seasonOf } from '../src/sim/weather.js';
-import { sunTimes } from '../src/sim/sky.js';
+import { sunTimes, shadowOf, directSun } from '../src/sim/sky.js';
+import { AIRCRAFT_TYPES } from '../src/sim/aircraftTypes.js';
 
 const map = JSON.parse(await readFile(new URL('../public/data/maa-map.json', import.meta.url), 'utf8'));
 let failed = 0;
@@ -105,6 +106,16 @@ again.restore(snap);
 day.update(3600);
 again.update(3600);
 check('save and load: weather, lights and wind identical an hour later', JSON.stringify([day.weather.now, day.lights, day.wind]) === JSON.stringify([again.weather.now, again.lights, again.wind]));
+
+// ---- shadows follow the sun and the weather --------------------------------------------------------------------
+const sunE = shadowOf({ el: 30, az: 90 }, 10);
+const sunS = shadowOf({ el: 30, az: 180 }, 10);
+check('a shadow falls away from the sun (sun east: west; sun south: north; y is south)', sunE.dx < -1 && Math.abs(sunE.dy) < 0.01 && sunS.dy < -1 && Math.abs(sunS.dx) < 0.01);
+check('a low sun makes longer shadows', Math.abs(shadowOf({ el: 15, az: 90 }, 10).dx) > Math.abs(shadowOf({ el: 70, az: 90 }, 10).dx) * 3);
+check('a shadow grows with height, so low parts stay near the aircraft', Math.abs(shadowOf({ el: 30, az: 90 }, 12).dx / shadowOf({ el: 30, az: 90 }, 4).dx - 3) < 1e-6);
+check('no shadow at night', shadowOf({ el: -5, az: 90 }, 10).alpha === 0);
+check('clear sky gives full shadows; rain, overcast and fog take them away', directSun({ cloud: 0.04, rain: 0, vis: 10000 }) === 1 && directSun({ cloud: 0.9, rain: 0.5, vis: 3000 }) < 0.05 && directSun({ cloud: 0.95, rain: 0, vis: 7000 }) < 0.1 && directSun({ cloud: 0.3, rain: 0, vis: 500 }) < 0.05);
+check('every aircraft type has a real height for its shadow', Object.values(AIRCRAFT_TYPES).every((t) => t.height > 3 && t.height < 25));
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nall weather checks passed');
 process.exit(failed ? 1 : 0);

@@ -20,6 +20,17 @@ const KT = 0.5144;
 const GLIDE = Math.tan((3 * Math.PI) / 180);
 const VISIBLE_FINAL_M = 17000;
 const TOUCHDOWN_M = 350;
+// The two runways. Wide-bodies use 07/25 only: 12/30 is shorter and runway 12 has a displaced threshold.
+export const RUNWAY_MODES = { both: 'Landing + take-off', arr: 'Landing only', dep: 'Take-off only', off: 'Not in use' };
+export const RUNWAY_PLANS = {
+  single: { label: 'Single runway', main: 'both', second: 'off', text: '07/25 does everything; 12/30 is a taxiway' },
+  dualLand: { label: 'Dual landing', main: 'both', second: 'arr', text: 'Both runways land; take-offs on 07/25' },
+  segregated: { label: 'Segregated', main: 'dep', second: 'arr', text: 'Narrow-bodies land on 12/30, take-offs on 07/25' },
+  dualMixed: { label: 'Dual mixed', main: 'both', second: 'both', text: 'Both runways land and take off: most capacity, most taxiway crossings' },
+};
+const SECOND_RUNWAY_PENALTY_S = 30; // an arrival takes 12/30 only when that lands it this much sooner (the taxi in is longer)
+const ARRIVAL_BALANCE_S = 25;
+const CROSSING_GAP_S = 80; // between movements on the two runways that both pass where their centrelines meet
 const HOLD_SHORT_M = 90;
 const RUNWAY_BAND_M = 75;
 const TAXI_MAX = 12;
@@ -60,6 +71,13 @@ const LANDING_PER_T = { dom: 320, intl: 640 };
 const PARKING_PER_T_H = 12;
 
 const VISIBLE = new Set(['final', 'goAround', 'landing', 'taxiIn', 'atStand', 'pushback', 'turning', 'taxiOut', 'holdShort', 'lineUp', 'takeoff']);
+const RUNWAY_FREE_ALT_M = 30; // a departure no longer holds the runway once it is airborne and climbing
+const LINE_UP_SPEED = 6; // m/s, from the hold-short line onto the centreline
+const AGAINST_FLOW_COST = 0.5; // extra route cost per metre against the taxi pattern (gentle: a long detour costs more than it saves)
+const ROLL_COST = 100; // route cost per metre of extra landing roll: the runway is what is scarce, so nearly always the first exit
+const ROLL_MAX_SPEED = 30; // m/s, rolling on towards a later exit
+const MAX_EXTRA_ROLL_M = 1300; // an arrival takes no exit further than this past the first it can reach
+const TYPICAL_STOP_M = 1500; // where a narrow-body can first turn off, for planning the pattern
 const WINGTIP_MARGIN_M = 5; // a taxiing wingtip keeps this far from a parked aircraft or its vehicles
 const WING_PENALTY = 2e4; // route cost of passing too close to an occupied stand (only used when there is no other way)
 const OCCUPYING = new Set(['atStand', 'taxiIn', 'landing']); // flights that are (or are about to be) on their stand
@@ -76,6 +94,17 @@ export const PHASE_LABEL = {
 
 const freshDayWx = () => ({ rain: 0, storm: 0, lowVis: 0, ramp: 0, minVis: 99999, maxT: -99, minT: 99, maxWind: 0 });
 const hhmmText = (t) => `${String(Math.floor((t % 86400) / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}`;
+
+// Where the centrelines of two runways meet.
+function lineCross(A, B) {
+  const [a, b] = Object.values(A.ends);
+  const [c, d] = Object.values(B.ends);
+  const r = [b[0] - a[0], b[1] - a[1]];
+  const q = [d[0] - c[0], d[1] - c[1]];
+  const den = r[0] * q[1] - r[1] * q[0];
+  const k = ((c[0] - a[0]) * q[1] - (c[1] - a[1]) * q[0]) / den;
+  return [a[0] + r[0] * k, a[1] + r[1] * k];
+}
 
 export class World {
   constructor(map, { scenarioId = 'normal', startTime = Date.now(), timetable = null, weatherMode = 'random', trafficBoost = DEFAULT_TRAFFIC_BOOST } = {}) {
@@ -96,7 +125,15 @@ export class World {
     this.weatherMode = weatherMode;
     this.weather = new Weather({ seed: this.daySeed + 5, t0: this.t0, month: sw.month ?? ist.getUTCMonth(), mode: weatherMode, bias: sw.bias ?? {}, forced: sw.forced ?? [] });
 
-    this.frame = runwayFrames(map.runways).find((f) => f.ref === '07/25');
+    const frames = runwayFrames(map.runways);
+    const facts = map.meta?.runwayFacts?.displacedThresholds ?? {};
+    this.runways = ['07/25', '12/30'].map((ref) => ({
+      ref, frame: frames.find((f) => f.ref === ref), active: null, mode: 'both', user: null, closures: [], arrSlots: [],
+      lastDeparture: { t: -1e9, wake: 'M' }, landings: 0, takeoffs: 0, moves: [], displaced: facts,
+    }));
+    [this.main, this.second] = this.runways;
+    // Where the two centrelines meet: just past the 30 end, on the 25 side of 07/25.
+    this.crossPoint = lineCross(this.main.frame, this.second.frame);
     this.graph = new TaxiGraph(map);
     // Link each stand to the taxi network first; its direction is then its actual lead-in line,
     // so the paint, the parked aircraft and every taxi-in / push-back all agree.
@@ -141,13 +178,13 @@ export class World {
     this.dayWx = freshDayWx();
     this.ledger = new Ledger();
     this.tariff = 'standard';
-    this.active = this.#bestRunway();
-    this.#setupRunway();
-    this.closures = [];
+    this.runwayPlan = 'dualLand';
+    this.second.mode = RUNWAY_PLANS.dualLand.second;
+    for (const R of this.runways) {
+      R.active = this.#bestRunway(R);
+      this.#setupRunway(R);
+    }
     this.edgeUse = new Map(); // taxi edge id -> Map(flight id -> direction)
-    this.arrSlots = [];
-    this.runwayUser = null; // flight id currently using the runway
-    this.lastDeparture = { t: -1e9, wake: 'M' };
     this.mods = { lowVisUntil: -1, itUntil: -1, itFactor: 1, secUntil: -1 };
 
     // A busier day starts with an airport equipped for it: crews and vehicles scale with the Traffic option.
@@ -207,7 +244,7 @@ export class World {
       this.#environment();
     }
     this.#runEvents(dt);
-    this.closures = this.closures.filter((c) => c.to > this.t);
+    for (const R of this.runways) R.closures = R.closures.filter((c) => c.to > this.t);
     for (const f of this.flights) this.#updateFlight(f, dt);
     this.#updateVehicles(dt);
     this.term.update(dt);
@@ -283,43 +320,124 @@ export class World {
   // ---------------------------------------------------------------------------------------------
   // Runway geometry and control
 
-  #setupRunway() {
-    const ends = this.frame.ends;
-    const other = Object.keys(ends).find((d) => d !== this.active);
-    this.thr = ends[this.active];
-    this.far = ends[other];
-    const len = this.frame.length;
-    this.u = [(this.far[0] - this.thr[0]) / len, (this.far[1] - this.thr[1]) / len];
-    this.exits = this.graph.runwayExits('07/25', this.thr, this.far);
-    this.depEntry = this.exits.find((e) => e.s > -20) ?? this.exits[0];
+  #setupRunway(R) {
+    const ends = R.frame.ends;
+    const other = Object.keys(ends).find((d) => d !== R.active);
+    R.thr = ends[R.active];
+    R.far = ends[other];
+    R.u = [(R.far[0] - R.thr[0]) / R.frame.length, (R.far[1] - R.thr[1]) / R.frame.length];
+    R.td = TOUCHDOWN_M + (R.displaced[R.active] ?? 0); // aiming point past any displaced threshold
+    R.exits = this.graph.runwayExits(R.ref, R.thr, R.far);
+    R.depEntry = R.exits.find((e) => e.s > -20) ?? R.exits[0];
+    R.crossS = this.#along(this.crossPoint, R);
+  }
+
+  // Compatibility for the main runway; everything per-runway is on the runway objects.
+  get active() {
+    return this.main.active;
+  }
+
+  get frame() {
+    return this.main.frame;
+  }
+
+  get closures() {
+    return this.main.closures;
+  }
+
+  #rwByRef(ref) {
+    return this.runways.find((R) => R.ref === ref) ?? this.main;
+  }
+
+  // The runway a flight is using or assigned to.
+  runwayOf(f) {
+    return this.#rwByRef(f.rwy);
+  }
+
+  #otherRunway(R) {
+    return R === this.main ? this.second : this.main;
+  }
+
+  #acceptsArrivals(R) {
+    return R.mode === 'both' || R.mode === 'arr';
+  }
+
+  #acceptsDepartures(R) {
+    return R.mode === 'both' || R.mode === 'dep';
+  }
+
+  #fitsRunway(R, f) {
+    return R === this.main || AIRCRAFT_TYPES[f.type].code !== 'E';
+  }
+
+  // Does this movement pass where the centrelines meet? A landing that stops short of it (07, 12) does
+  // not; one that rolls through it (25) or flies over it on short final (30) does. A take-off passes it
+  // if it lies ahead of the roll (07, 25, 12), not if behind (30).
+  #usesCrossing(R, kind) {
+    return kind === 'arr' ? R.crossS < R.td + 1900 : R.crossS > R.depEntry.s;
+  }
+
+  // Is the other runway using the crossing right now, or about to (within `within` seconds)?
+  #crossingBusy(R, within = 0) {
+    const O = this.#otherRunway(R);
+    if (O.mode === 'off') return false;
+    const g = O.user !== null ? this.flights.find((x) => x.id === O.user) : null;
+    if (g && ['final', 'landing'].includes(g.phase) && this.#usesCrossing(O, 'arr')) return true;
+    if (g && ['lineUp', 'takeoff'].includes(g.phase) && this.#usesCrossing(O, 'dep')) return true;
+    if (within > 0 && this.#usesCrossing(O, 'arr') && this.#nextArrivalTime(O) - this.t < within) return true;
+    return false;
   }
 
   runwayHeading(designator) {
-    const ends = this.frame.ends;
+    const R = this.runways.find((x) => designator in x.frame.ends) ?? this.main;
+    const ends = R.frame.ends;
     const other = Object.keys(ends).find((d) => d !== designator);
     const [a, b] = [ends[designator], ends[other]];
     return ((Math.atan2(b[0] - a[0], -(b[1] - a[1])) * 180) / Math.PI + 360) % 360;
   }
 
-  windComponents(designator = this.active) {
+  windComponents(designator = this.main.active) {
     const diff = ((this.wind.from - this.runwayHeading(designator)) * Math.PI) / 180;
     return { head: this.wind.kt * Math.cos(diff), cross: Math.abs(this.wind.kt * Math.sin(diff)) };
   }
 
-  #bestRunway() {
-    return Object.keys(this.frame.ends).reduce((a, b) => (this.windComponents(a).head >= this.windComponents(b).head ? a : b));
+  // Into the wind. On 12/30 runway 12 is preferred unless it has a real tailwind: a landing on 30 flies
+  // low over 07/25 on short final, so it interlocks with everything on that runway.
+  #bestRunway(R = this.main) {
+    if (R === this.second && this.windComponents('12').head > -5) return '12';
+    return Object.keys(R.frame.ends).reduce((a, b) => (this.windComponents(a).head >= this.windComponents(b).head ? a : b));
   }
 
-  #along(p) {
-    return (p[0] - this.thr[0]) * this.u[0] + (p[1] - this.thr[1]) * this.u[1];
+  #along(p, R = this.main) {
+    return (p[0] - R.thr[0]) * R.u[0] + (p[1] - R.thr[1]) * R.u[1];
   }
 
-  #offCentre(p) {
-    return Math.abs((p[0] - this.thr[0]) * this.u[1] - (p[1] - this.thr[1]) * this.u[0]);
+  #offCentre(p, R = this.main) {
+    return Math.abs((p[0] - R.thr[0]) * R.u[1] - (p[1] - R.thr[1]) * R.u[0]);
   }
 
-  runwayClosed(at = this.t) {
-    return this.closures.some((c) => c.from <= at && c.to > at);
+  #inStrip(p, R, band = RUNWAY_BAND_M) {
+    if (this.#offCentre(p, R) >= band) return false;
+    const a = this.#along(p, R);
+    return a > -100 && a < R.frame.length + 100;
+  }
+
+  // Closed now? For one runway, or for the main one when none is named.
+  runwayClosed(at = this.t, ref = null) {
+    return this.#rwByRef(ref).closures.some((c) => c.from <= at && c.to > at);
+  }
+
+  #rwClosed(R, at = this.t) {
+    return R.closures.some((c) => c.from <= at && c.to > at);
+  }
+
+  // Release any runway this flight holds.
+  #releaseRunways(f) {
+    for (const R of this.runways) if (R.user === f.id) R.user = null;
+  }
+
+  #holdsRunway(f) {
+    return this.runways.some((R) => R.user === f.id);
   }
 
   // Visibility in metres now: the weather's, or the scripted smoke event's 800 m if that is worse.
@@ -336,35 +454,57 @@ export class World {
 
   // Earliest landing time >= earliest that keeps wake separation with every booked slot and
   // avoids closures; extra spacing when departures are queueing (mixed-mode runway).
-  #nextSlot(earliest, wake, ignoreId) {
+  #nextSlot(earliest, wake, ignoreId, R = this.main) {
     const f = this.#sepFactor();
-    const queue = this.flights.filter((x) => x.phase === 'holdShort' || x.phase === 'taxiOut').length;
-    const extra = queue >= 3 ? 50 : 0;
-    const slots = this.arrSlots.filter((s) => s.id !== ignoreId);
+    // Mixed-mode spacing: departures queueing for this runway, or aircraft waiting to cross it.
+    const queue = R.mode === 'arr' ? 0 : this.flights.filter((x) => (x.phase === 'holdShort' || x.phase === 'taxiOut') && this.runwayOf(x) === R).length;
+    const crossers = this.flights.filter((x) => x.crossWait === R.ref).length;
+    const extra = (queue >= 3 ? 50 : 0) + (crossers ? 30 : 0);
+    const slots = R.arrSlots.filter((s) => s.id !== ignoreId);
+    // Arrivals on the other runway that also pass the crossing need a gap too.
+    const O = this.#otherRunway(R);
+    const cross = this.#usesCrossing(R, 'arr') && O.mode !== 'off' && this.#usesCrossing(O, 'arr') ? O.arrSlots.filter((s) => s.id !== ignoreId) : [];
     const ok = (c) => {
-      if (this.closures.some((cl) => c > cl.from - 60 && c < cl.to)) return false;
+      if (R.closures.some((cl) => c > cl.from - 60 && c < cl.to)) return false;
+      if (cross.some((s) => Math.abs(s.time - c) < CROSSING_GAP_S)) return false;
       return slots.every((s) => (s.time <= c ? c - s.time >= SEP[s.wake + wake] * f + extra : s.time - c >= SEP[wake + s.wake] * f + extra));
     };
-    const candidates = [earliest, ...slots.map((s) => s.time + (SEP[s.wake + wake] * f + extra)), ...this.closures.map((c) => c.to)]
+    const candidates = [earliest, ...slots.map((s) => s.time + (SEP[s.wake + wake] * f + extra)), ...cross.map((s) => s.time + CROSSING_GAP_S), ...R.closures.map((c) => c.to)]
       .filter((c) => c >= earliest)
       .sort((a, b) => a - b);
     for (const c of candidates) if (ok(c)) return c;
-    return Math.max(earliest, ...slots.map((s) => s.time)) + 180 * f;
+    return Math.max(earliest, ...slots.map((s) => s.time), ...cross.map((s) => s.time + CROSSING_GAP_S)) + 180 * f;
   }
 
+  // Runways this arrival can use: those landing traffic that fit it; a wide-body falls back on 07/25.
+  #arrivalRunways(f) {
+    const open = this.runways.filter((R) => this.#acceptsArrivals(R) && this.#fitsRunway(R, f));
+    return open.length ? open : [this.main];
+  }
+
+  // Books the landing on the runway that suits best: soonest, with fewest already booked, 07/25 preferred
+  // when it is close (a shorter taxi in).
   #bookSlot(f, earliest) {
-    this.arrSlots = this.arrSlots.filter((s) => s.id !== f.id);
-    f.slot = this.#nextSlot(earliest, f.wake, f.id);
-    this.arrSlots.push({ id: f.id, time: f.slot, wake: f.wake });
-    this.arrSlots.sort((a, b) => a.time - b.time);
+    this.#releaseSlot(f);
+    let best = null;
+    for (const R of this.#arrivalRunways(f)) {
+      const slot = this.#nextSlot(earliest, f.wake, f.id, R);
+      // Share the load: every arrival already booked on a runway counts against it.
+      const score = slot + (R === this.main ? 0 : SECOND_RUNWAY_PENALTY_S) + R.arrSlots.length * ARRIVAL_BALANCE_S;
+      if (!best || score < best.score) best = { R, slot, score };
+    }
+    f.rwy = best.R.ref;
+    f.slot = best.slot;
+    best.R.arrSlots.push({ id: f.id, time: f.slot, wake: f.wake });
+    best.R.arrSlots.sort((a, b) => a.time - b.time);
   }
 
   #releaseSlot(f) {
-    this.arrSlots = this.arrSlots.filter((s) => s.id !== f.id);
+    for (const R of this.runways) R.arrSlots = R.arrSlots.filter((s) => s.id !== f.id);
   }
 
-  #nextArrivalTime() {
-    const upcoming = this.arrSlots.find((s) => s.time >= this.t - 10);
+  #nextArrivalTime(R = this.main) {
+    const upcoming = R.arrSlots.find((s) => s.time >= this.t - 10);
     return upcoming ? upcoming.time : Infinity;
   }
 
@@ -372,6 +512,7 @@ export class World {
   // Flight state machine
 
   #updateFlight(f, dt) {
+    const R = this.runwayOf(f);
     switch (f.phase) {
       case 'scheduled':
         if (this.t >= f.eta - 20 * 60) {
@@ -404,7 +545,7 @@ export class World {
           }
           f.phase = 'final';
           this.#mark(f, 'final');
-          this.#say(f, true, `runway ${this.active}, wind ${String(this.wind.from).padStart(3, '0')} degrees ${this.wind.kt} knots, cleared to land`);
+          this.#say(f, true, `runway ${R.active}, wind ${String(this.wind.from).padStart(3, '0')} degrees ${this.wind.kt} knots, cleared to land`);
         }
         break;
       case 'final':
@@ -425,7 +566,7 @@ export class World {
       case 'taxiIn':
         this.#move(f, dt, TAXI_MAX * this.fx.ground);
         // Vacated once the whole aircraft is past the runway edge.
-        if (this.runwayUser === f.id && this.#offCentre([f.x, f.y]) > this.frame.width / 2 + AIRCRAFT_TYPES[f.type].length / 2) this.runwayUser = null;
+        if (R.user === f.id && this.#offCentre([f.x, f.y], R) > R.frame.width / 2 + AIRCRAFT_TYPES[f.type].length / 2) R.user = null;
         if (f.s >= f.limit - 0.3) this.#arriveAtStand(f);
         break;
       case 'atStand':
@@ -468,9 +609,9 @@ export class World {
         this.#move(f, dt, 8, { noBrake: true });
         if (f.s >= f.limit - 0.5) {
           f.phase = 'takeoff';
-          this.#say(f, false, `runway ${this.active}, cleared for take-off`);
-          f.heading = Math.atan2(this.u[1], this.u[0]);
-          f.s = this.#along([f.x, f.y]);
+          this.#say(f, false, `runway ${R.active}, cleared for take-off`);
+          f.heading = Math.atan2(R.u[1], R.u[0]);
+          f.s = this.#along([f.x, f.y], R);
         }
         break;
       case 'takeoff':
@@ -496,7 +637,7 @@ export class World {
     f.waiting = null;
     this.#bookSlot(f, Math.max(this.t + 4 * 60, f.eta));
     if (f.slot - f.eta > 50 * 60) {
-      this.#divert(f, this.runwayClosed(f.eta) ? 'Runway closed' : 'Arrival queue too long');
+      this.#divert(f, this.#rwClosed(this.runwayOf(f), f.eta) ? 'Runway closed' : 'Arrival queue too long');
       return;
     }
     f.phase = 'inbound';
@@ -509,53 +650,50 @@ export class World {
   }
 
   #fly(f) {
+    const R = this.runwayOf(f);
     const dist = (f.slot - this.t) * f.vApp;
     f.alt = Math.max(0, dist * GLIDE) + (dist > 0 ? 12 : 0);
     f.speed = f.vApp;
-    f.s = TOUCHDOWN_M - dist;
+    f.s = R.td - dist;
     this.#placeOnRunwayLine(f, f.s);
     // A closed runway is known well out; occupancy is decided just before the threshold, by
     // when the previous arrival is normally turning off (as with a real landing clearance).
-    if (dist < f.vApp * 30 && this.runwayClosed()) {
+    if (dist < f.vApp * 30 && this.#rwClosed(R)) {
       this.#goAround(f, 'Runway closed');
       return;
     }
-    if (dist < f.vApp * 8 && this.runwayUser !== f.id) {
-      if (this.runwayUser !== null) {
+    if (dist < f.vApp * 8 && R.user !== f.id) {
+      if (R.user !== null) {
         this.#goAround(f, 'Runway occupied');
         return;
       }
-      this.runwayUser = f.id;
+      if (this.#usesCrossing(R, 'arr') && this.#crossingBusy(R)) {
+        this.#goAround(f, 'Traffic on the crossing runway');
+        return;
+      }
+      R.user = f.id;
     }
     if (this.t >= f.slot) {
       f.phase = 'landing';
       this.#mark(f, 'landed');
       f.alt = 0;
-      f.s = TOUCHDOWN_M;
+      f.s = R.td;
       this.#releaseSlot(f);
       this.kpi.arrivals++;
+      R.landings++;
+      R.moves.push(this.t);
       const fee = AIRCRAFT_TYPES[f.type].mtow * LANDING_PER_T[f.intl ? 'intl' : 'dom'];
       this.#earn(fee * TARIFFS[this.tariff].mult, 'landing', { airline: f.airline });
       // Choose the first exit we can reach at turn-off speed, with a route to the stand.
-      const stop = TOUCHDOWN_M + (f.vApp ** 2 - 12 ** 2) / (2 * 2.3) + 40;
+      const stop = R.td + (f.vApp ** 2 - 12 ** 2) / (2 * 2.3) + 40;
       const link = this.graph.standNode.get(f.standId);
+      // Exits the aircraft can reach at turn-off speed and can make the turn into (a turn-off sharper
+      // than ~100°, an exit built for the opposite direction, is not something an airliner can do).
+      // The cheapest route that follows the taxi pattern, among those with nobody coming the other
+      // way along it; if every one has somebody, the cheapest.
       const options = [];
-      for (const ex of this.exits) {
-        if (ex.s < stop || options.length >= 4) continue;
-        const prev = this.#runwayNeighbour(ex.node, -1);
-        if (prev === null) continue;
-        // Arriving along the runway: the route may only turn off at an angle the aircraft can make.
-        const path = this.graph.findPath(ex.node, link.node, { ...this.#routeOptions(f), prev });
-        if (!path || path.length < 2) continue;
-        // Only exits angled with the landing direction: a turn-off sharper than ~100° (an exit
-        // built for the opposite direction) is not something an airliner can make.
-        const nx = this.graph.nodes[path[1]];
-        const en = this.graph.nodes[ex.node];
-        const exitDir = unit([nx.x - en.x, nx.y - en.y]);
-        if (exitDir[0] * this.u[0] + exitDir[1] * this.u[1] < -0.17) continue;
-        options.push({ ex, path, prev, clear: !this.#routeConflict(f, this.#legsOf(path)) });
-      }
-      // The first exit with nobody coming the other way along the route, else the first exit.
+      this.#bestExit(link, this.#routeOptions(f).extraCost, stop, (o) => options.push({ ...o, clear: !this.#routeConflict(f, this.#legsOf(o.path)) }), R);
+      options.sort((a, b) => a.cost - b.cost);
       const pick = options.find((o) => o.clear) ?? options[0];
       if (pick) {
         f.exit = pick.ex;
@@ -569,9 +707,10 @@ export class World {
   }
 
   #placeOnRunwayLine(f, s) {
-    f.x = this.thr[0] + this.u[0] * s;
-    f.y = this.thr[1] + this.u[1] * s;
-    f.heading = Math.atan2(this.u[1], this.u[0]);
+    const R = this.runwayOf(f);
+    f.x = R.thr[0] + R.u[0] * s;
+    f.y = R.thr[1] + R.u[1] * s;
+    f.heading = Math.atan2(R.u[1], R.u[0]);
   }
 
   #goAround(f, reason) {
@@ -579,20 +718,25 @@ export class World {
     f.phaseSince = this.t;
     f.speed = 75;
     this.#releaseSlot(f);
-    if (this.runwayUser === f.id) this.runwayUser = null;
+    this.#releaseRunways(f);
     this.kpi.goArounds++;
     this.note('warn', `${f.arrNo} go-around: ${reason}.`, { flight: f.id });
   }
 
   #roll(f, dt) {
-    f.speed = Math.max(12, f.speed - 2.3 * dt);
+    // Brake only as much as the exit needs: towards a later exit the aircraft keeps rolling (up to
+    // ROLL_MAX_SPEED) and slows to turn-off speed as it gets there, so the runway is free sooner.
+    const toExit = f.exit ? Math.max(0, f.exit.s - f.exitTurn - f.s - f.gN) : 0;
+    const wanted = Math.min(ROLL_MAX_SPEED, Math.sqrt(144 + 2 * 2.3 * toExit));
+    f.speed = Math.max(wanted, f.speed - 2.3 * dt);
     f.s += f.speed * dt;
     this.#placeOnRunwayLine(f, f.s);
     // Start following the lead-off line just before it curves away from the centreline.
     if (f.exit && f.s + f.gN >= f.exit.s - f.exitTurn - 6) {
       const L = AIRCRAFT_TYPES[f.type].length;
-      const main = [this.thr[0] + this.u[0] * (f.s + f.gN - f.wb), this.thr[1] + this.u[1] * (f.s + f.gN - f.wb)];
-      const nose = [this.thr[0] + this.u[0] * (f.s + f.gN), this.thr[1] + this.u[1] * (f.s + f.gN)];
+      const R = this.runwayOf(f);
+      const main = [R.thr[0] + R.u[0] * (f.s + f.gN - f.wb), R.thr[1] + R.u[1] * (f.s + f.gN - f.wb)];
+      const nose = [R.thr[0] + R.u[0] * (f.s + f.gN), R.thr[1] + R.u[1] * (f.s + f.gN)];
       const pts = this.graph.smoothRoute(f.exitPath, { prev: f.exitPrev, start: [main, nose] });
       f.routeIds = f.exitPath;
       // The nose gear stops where the parked aircraft's nose gear will be.
@@ -606,14 +750,14 @@ export class World {
   }
 
   // Next runway node from `node` along the active direction (+1) or against it (-1).
-  #runwayNeighbour(node, sign) {
-    const here = this.#along([this.graph.nodes[node].x, this.graph.nodes[node].y]);
+  #runwayNeighbour(node, sign, R = this.main) {
+    const here = this.#along([this.graph.nodes[node].x, this.graph.nodes[node].y], R);
     let best = null;
     for (const id of this.graph.nodes[node].edges) {
       const e = this.graph.edges[id];
-      if (e.kind !== 'runway' || e.ref !== '07/25') continue;
+      if (e.kind !== 'runway' || e.ref !== R.ref) continue;
       const o = e.a === node ? e.b : e.a;
-      const s = this.#along([this.graph.nodes[o].x, this.graph.nodes[o].y]);
+      const s = this.#along([this.graph.nodes[o].x, this.graph.nodes[o].y], R);
       if ((s - here) * sign > 0.5 && (!best || Math.abs(s - here) < best.d)) best = { o, d: Math.abs(s - here) };
     }
     return best?.o ?? null;
@@ -624,7 +768,7 @@ export class World {
     const stand = this.standById.get(f.standId);
     this.#parkAt(f, stand);
     f.onBlock = this.t;
-    if (this.runwayUser === f.id) this.runwayUser = null;
+    this.#releaseRunways(f);
     this.#startTurnaround(f, 0);
   }
 
@@ -715,17 +859,21 @@ export class World {
     return best;
   }
 
-  // Where a taxi route enters the active runway's strip (after `skip` m, before `upTo` m).
+  // Where a taxi route enters a runway strip (after `skip` m, before `upTo` m). A runway that is not in
+  // use is just pavement. Each stop remembers which runway it is for.
   #crossingStops(path, skip, upTo = path.total) {
     const stops = [];
-    let inside = true;
-    for (let s = 0; s <= upTo; s += 5) {
-      const p = this.#pointAt(path, s);
-      const near = this.#offCentre([p.x, p.y]) < RUNWAY_BAND_M && this.#along([p.x, p.y]) > -100 && this.#along([p.x, p.y]) < this.frame.length + 100;
-      if (near && !inside && s > skip) stops.push({ at: Math.max(0, s - 20), cleared: false });
-      inside = near;
+    for (const R of this.runways) {
+      if (R.mode === 'off') continue;
+      let inside = true;
+      for (let s = 0; s <= upTo; s += 5) {
+        const p = this.#pointAt(path, s);
+        const near = this.#inStrip([p.x, p.y], R);
+        if (near && !inside && s > skip) stops.push({ at: Math.max(0, s - 20), cleared: false, rw: R.ref });
+        inside = near;
+      }
     }
-    return stops;
+    return stops.sort((a, b) => a.at - b.at);
   }
 
   #move(f, dt, vmax, { reverse = false, noBrake = false } = {}) {
@@ -739,14 +887,27 @@ export class World {
       }
       // Stop at uncleared runway crossings.
       const stop = f.stops.find((st) => !st.cleared && st.at >= f.s - 1);
+      if (f.crossWait && !(stop && stop.rw === f.crossWait && stop.at - f.s < 3)) {
+        f.crossWait = null; // re-routed, or no longer at the line
+        f.crossWaitSince = null;
+      }
       if (stop) {
-        if (stop.at - f.s < 3 && this.#crossingClear(f)) {
+        const SR = this.#rwByRef(stop.rw);
+        if (stop.at - f.s < 3 && this.#crossingClear(f, SR)) {
           stop.cleared = true;
-          this.runwayUser = f.id;
-          f.crossing = true;
+          f.crossWait = null;
+          if (SR.mode !== 'off') {
+            SR.user = f.id;
+            f.crossing = SR.ref;
+          }
+          if (f.waiting?.startsWith('Waiting to cross')) f.waiting = null;
         } else {
           target = Math.min(target, Math.sqrt(Math.max(0, 2 * DECEL * (stop.at - f.s))));
-          if (stop.at - f.s < 3) f.waiting = 'Waiting to cross the runway';
+          if (stop.at - f.s < 3) {
+            f.waiting = `Waiting to cross runway ${SR.active}`;
+            f.crossWait = SR.ref;
+            f.crossWaitSince ??= this.t;
+          }
         }
       }
       // Junction holds: go on only if no corridor left on our route is occupied, or promised to a
@@ -754,7 +915,7 @@ export class World {
       const j = this.#nextJunction(f);
       if (j && j.stopS - f.s < (f.speed ** 2) / (2 * DECEL) + 60) {
         // An aircraft still vacating the runway never stops on it: it always has priority.
-        const vacating = this.runwayUser === f.id || this.#offCentre([f.x, f.y]) < RUNWAY_BAND_M;
+        const vacating = this.#holdsRunway(f) || this.runways.some((R) => R.mode !== 'off' && this.#inStrip([f.x, f.y], R));
         const opposing = vacating ? null : this.#routeConflict(f, this.#remainingLegs(f, j.enterS + 0.5));
         f.admitted = !opposing;
         f.waitFor = opposing?.id ?? null;
@@ -785,9 +946,13 @@ export class World {
           if (f.waiting?.startsWith('Giving way')) f.waiting = null;
         }
       }
-      if (f.crossing && this.#offCentre([f.x, f.y]) > RUNWAY_BAND_M + 10) {
-        f.crossing = false;
-        if (this.runwayUser === f.id) this.runwayUser = null;
+      if (f.crossing) {
+        const CR = this.#rwByRef(f.crossing);
+        if (!this.#inStrip([f.x, f.y], CR, RUNWAY_BAND_M + 10)) {
+          f.crossing = null;
+          f.crossWaitSince = null;
+          if (CR.user === f.id) CR.user = null;
+        }
       }
       // Keep clear of aircraft ahead.
       const blocker = this.t > f.ghostUntil ? this.#blocker(f, len) : null;
@@ -801,7 +966,7 @@ export class World {
         f.waiting = `Holding for ${blocker.phase === 'taxiIn' ? blocker.arrNo : blocker.depNo}`;
         // Last-resort deadlock breaker: only for a cycle of aircraft each waiting on the next,
         // never for an ordinary queue behind a stopped or holding aircraft.
-        if (f.blockedFor > (this.runwayUser === f.id ? 60 : 240) && this.#inBlockCycle(f)) {
+        if (f.blockedFor > (this.#holdsRunway(f) ? 60 : 240) && this.#inBlockCycle(f)) {
           f.ghostUntil = this.t + 30;
           f.blockedFor = 0;
           this.kpi.conflictsIgnored++;
@@ -866,10 +1031,14 @@ export class World {
       occupied = new Map();
       for (const x of this.flights) if (x !== f && x.standId !== null && OCCUPYING.has(x.phase)) occupied.set(x.standId, x.type);
     }
+    const plan = this.#flowPlan();
     return {
-      runwayCost: (e) => (e.ref === '07/25' ? 1e5 : 300),
+      runwayCost: (e) => this.#runwayEdgeCost(e),
       extraCost: (e, from) => {
         let cost = 0;
+        // Against the taxi pattern: allowed, but a route that follows it is preferred.
+        const flow = plan.get(e.id);
+        if (flow && flow !== (e.a === from ? 1 : -1)) cost += e.len * AGAINST_FLOW_COST;
         if (occupied) {
           for (const n of this.wingReach.get(e.id) ?? []) {
             if (n.clear < reach && occupied.get(n.standId) === n.type && n.standId !== f.standId) {
@@ -881,10 +1050,84 @@ export class World {
         const use = this.edgeUse.get(e.id);
         if (!use || use.size === 0) return cost;
         const dir = e.a === from ? 1 : -1;
-        for (const d of use.values()) if (d !== dir) return cost + 5000;
+        for (const d of use.values()) if (d !== dir) return cost + 60 + e.len * 3; // per metre: a short stretch must not send anyone across the airfield
         return cost;
       },
     };
+  }
+
+  // The taxi pattern for the active runway: which way each taxi line normally runs, worked out from where
+  // traffic has to go. Departures from every stand set the flow first (they all head for one runway
+  // entry); arrivals then take the exit and route that least oppose them. A line used both ways goes
+  // with its majority. edge id -> +1 (a to b) or -1. Recomputed when the runway direction changes.
+  #flowPlan() {
+    const key = this.runways.map((R) => `${R.active}${R.mode}`).join('|');
+    if (this.flowPlanFor === key && this.flowPlanMap) return this.flowPlanMap;
+    const g = this.graph;
+    const flow = new Map();
+    const add = (path) => {
+      for (let i = 1; i < path.length; i++) {
+        const e = g.edgeBetween(path[i - 1], path[i]);
+        if (e?.kind === 'taxi') flow.set(e.id, (flow.get(e.id) ?? 0) + (e.a === path[i - 1] ? 1 : -1));
+      }
+    };
+    const runwayCost = (e) => this.#runwayEdgeCost(e);
+    const stands = this.stands.filter((st) => st.usable && !st.t3 && g.standNode.has(st.id));
+    const depRunways = this.runways.filter((R) => this.#acceptsDepartures(R));
+    const arrRunways = this.runways.filter((R) => this.#acceptsArrivals(R));
+    for (const st of stands) {
+      const link = g.standNode.get(st.id);
+      for (const R of depRunways.length ? depRunways : [this.main]) {
+        const path = g.findPath(link.entry, R.depEntry.node, { prev: link.node, runwayCost });
+        if (path) add(path);
+      }
+    }
+    const against = (e, from) => {
+      const v = flow.get(e.id) ?? 0;
+      return v * (e.a === from ? 1 : -1) < 0 ? e.len * 3 : 0;
+    };
+    for (const st of stands) {
+      const link = g.standNode.get(st.id);
+      for (const R of arrRunways.length ? arrRunways : [this.main]) {
+        const best = this.#bestExit(link, (e, from) => against(e, from), R.td + TYPICAL_STOP_M - TOUCHDOWN_M, null, R);
+        if (best) add(best.path);
+      }
+    }
+    this.flowPlanMap = new Map([...flow].filter(([, v]) => v !== 0).map(([id, v]) => [id, Math.sign(v)]));
+    this.flowPlanFor = key;
+    return this.flowPlanMap;
+  }
+
+  // Taxiing along a runway in use is a last resort; one not in use is just a long taxiway.
+  #runwayEdgeCost(e) {
+    return this.#rwByRef(e.ref).mode === 'off' ? 300 : 1e5;
+  }
+
+  // Cheapest way from the runway to a stand over the exits beyond `stop` metres: taxi distance, what
+  // extraCost adds, and a little for every metre more of landing roll (the runway stays occupied).
+  #bestExit(link, extraCost, stop, each = null, R = this.main) {
+    const runwayCost = (e) => this.#runwayEdgeCost(e);
+    let best = null;
+    for (const ex of R.exits) {
+      if (ex.s < stop || ex.s > stop + MAX_EXTRA_ROLL_M) continue;
+      const prev = this.#runwayNeighbour(ex.node, -1, R);
+      if (prev === null) continue;
+      const path = this.graph.findPath(ex.node, link.node, { runwayCost, extraCost, prev });
+      if (!path || path.length < 2) continue;
+      const nx = this.graph.nodes[path[1]];
+      const en = this.graph.nodes[ex.node];
+      const exitDir = unit([nx.x - en.x, nx.y - en.y]);
+      if (exitDir[0] * R.u[0] + exitDir[1] * R.u[1] < -0.17) continue;
+      let cost = (ex.s - stop) * ROLL_COST;
+      for (let i = 1; i < path.length; i++) {
+        const e = this.graph.edgeBetween(path[i - 1], path[i]);
+        if (e) cost += e.len + extraCost(e, path[i - 1]);
+      }
+      const option = { ex, path, prev, cost };
+      each?.(option);
+      if (!best || cost < best.cost) best = option;
+    }
+    return best;
   }
 
   // For every taxi line: the stands (and parked types) closer to it than the widest wingspan could
@@ -1074,7 +1317,7 @@ export class World {
     if (junction) for (const e of this.graph.edges) if (e.corr === junction.corr) avoid.add(e.id);
     const base = this.#routeOptions(f);
     const options = { ...base, prev: ids[k - 1], extraCost: (e, from) => (avoid.has(e.id) ? 1e5 : base.extraCost(e, from)) };
-    const dest = f.phase === 'taxiIn' ? this.graph.standNode.get(f.standId).node : this.#runwayNeighbour(this.depEntry.node, 1);
+    const dest = f.phase === 'taxiIn' ? this.graph.standNode.get(f.standId).node : this.#runwayNeighbour(this.runwayOf(f).depEntry.node, 1, this.runwayOf(f));
     const path = dest === null ? null : this.graph.findPath(ids[k], dest, options);
     if (!path || path.some((n, i) => i > 0 && avoid.has(this.graph.edgeBetween(path[i - 1], n)?.id))) return false;
     const nose = [f.x + Math.cos(f.heading) * f.gN, f.y + Math.sin(f.heading) * f.gN];
@@ -1108,7 +1351,7 @@ export class World {
       f.stops = this.#crossingStops(f.path, 0, f.limit);
       this.#planJunctions(f, [prev, ...route]);
     } else {
-      const dep = route.at(-2) === this.depEntry.node ? route.slice(0, -1) : route;
+      const dep = route.at(-2) === this.runwayOf(f).depEntry.node ? route.slice(0, -1) : route;
       this.#registerRoute(f, [prev, ...dep]);
       f.depRoute = dep;
       f.pushFallback = true;
@@ -1131,10 +1374,16 @@ export class World {
       const b = x.blockedBy !== null && x.blockedBy !== undefined ? this.flights.find((y) => y.id === x.blockedBy) : null;
       if (b && GROUND.has(b.phase)) return b.id;
       if (x.waitFor !== null && x.waitFor !== undefined) return x.waitFor;
-      if ((x.phase === 'holdShort' || x.phase === 'taxiOut') && this.runwayUser !== null && this.runwayUser !== x.id && x.waiting === 'Runway occupied') return this.runwayUser;
+      const XR = this.runwayOf(x);
+      if ((x.phase === 'holdShort' || x.phase === 'taxiOut') && XR.user !== null && XR.user !== x.id && x.waiting === 'Runway occupied') return XR.user;
+      // Waiting to cross a runway: for whoever is on it.
+      if (x.crossWait) {
+        const CR = this.#rwByRef(x.crossWait);
+        if (CR.user !== null && CR.user !== x.id) return CR.user;
+      }
       // In the departure queue: waiting for the aircraft at the front of it.
       if (x.phase === 'holdShort' && x.waiting?.startsWith('Departure queue')) {
-        const head = this.flights.filter((g) => g.phase === 'holdShort').sort((p, q) => (q.priority - p.priority) || (p.queuedAt - q.queuedAt))[0];
+        const head = this.flights.filter((g) => g.phase === 'holdShort' && this.runwayOf(g) === XR).sort((p, q) => (q.priority - p.priority) || (p.queuedAt - q.queuedAt))[0];
         if (head && head.id !== x.id) return head.id;
       }
       return null;
@@ -1151,9 +1400,25 @@ export class World {
     return false;
   }
 
-  #crossingClear(f) {
-    if (this.runwayUser !== null && this.runwayUser !== f.id) return false;
-    return this.#nextArrivalTime() - this.t > 60;
+  #crossingClear(f, R) {
+    if (R.mode === 'off') return true;
+    if (R.user !== null && R.user !== f.id) return false;
+    return this.#nextArrivalTime(R) - this.t > 60;
+  }
+
+  // Departure runway for this flight: the quickest once the queue and the taxi are counted.
+  #chooseDeparture(f) {
+    const options = this.runways.filter((R) => this.#acceptsDepartures(R) && this.#fitsRunway(R, f));
+    const open = options.filter((R) => !this.#rwClosed(R));
+    const list = open.length ? open : options.length ? options : [this.main];
+    let best = null;
+    for (const R of list) {
+      const entry = this.graph.nodes[R.depEntry.node];
+      const queue = this.flights.filter((x) => x !== f && DEPARTURE_QUEUE.has(x.phase) && this.runwayOf(x) === R).length;
+      const score = Math.hypot(entry.x - f.x, entry.y - f.y) / 10 + queue * 90;
+      if (!best || score < best.score) best = { R, score };
+    }
+    return best.R;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1501,15 +1766,18 @@ export class World {
       f.waiting = null;
       return;
     }
+    // Which runway: decided at the gate, and again until the aircraft actually pushes.
+    const DR = this.#chooseDeparture(f);
+    f.rwy = DR.ref;
     // Gate holding: with the runway closed, aircraft wait on stand (engines off), not in a queue.
-    if (this.runwayClosed() || this.closures.some((c) => c.from < this.t + 600 && c.to > this.t)) {
+    if (this.#rwClosed(DR) || DR.closures.some((c) => c.from < this.t + 600 && c.to > this.t)) {
       f.waiting = 'Runway closed: holding at the gate';
       f.delayCause ??= 'Runway closed';
       return;
     }
     // Departure metering: when the taxiway queue to the runway is full, aircraft wait at the gate (engines
     // off) instead of piling up on the taxiways, where they would block arrivals and each other.
-    const queued = this.flights.filter((x) => x !== f && DEPARTURE_QUEUE.has(x.phase)).length;
+    const queued = this.flights.filter((x) => x !== f && DEPARTURE_QUEUE.has(x.phase) && this.runwayOf(x) === DR).length;
     if (queued >= MAX_DEPARTURE_QUEUE && !f.pushTug) {
       f.waiting = 'Taxiway queue full: holding at the gate';
       f.delayCause ??= 'Departure queue (runway capacity)';
@@ -1832,8 +2100,9 @@ export class World {
     }
     // Two runway nodes beyond the entry so the lead-on curve ends on the centreline.
     const beforeEntry = ids.length >= 2 ? ids[ids.length - 2] : prev;
-    const r1 = this.#runwayNeighbour(this.depEntry.node, 1);
-    const r2 = r1 !== null ? this.#runwayNeighbour(r1, 1) : null;
+    const R = this.runwayOf(f);
+    const r1 = this.#runwayNeighbour(R.depEntry.node, 1, R);
+    const r2 = r1 !== null ? this.#runwayNeighbour(r1, 1, R) : null;
     if (r1 !== null) ids.push(r1);
     if (r2 !== null) ids.push(r2);
     const pts = g.smoothRoute(ids, { prev, start });
@@ -1843,7 +2112,7 @@ export class World {
     let sHold = f.path.total;
     for (let s = f.path.total; s > 0; s -= 2) {
       const p = this.#pointAt(f.path, s);
-      if (this.#offCentre([p.x, p.y]) >= HOLD_SHORT_M) {
+      if (this.#offCentre([p.x, p.y], R) >= HOLD_SHORT_M) {
         sHold = s;
         break;
       }
@@ -1852,7 +2121,7 @@ export class World {
     // Line-up ends when the main gear is past the lead-on curve, i.e. lined up.
     let lineEnd = f.path.total;
     if (r1 !== null && beforeEntry !== null && beforeEntry !== undefined) {
-      const arc = g.filletArc(beforeEntry, this.depEntry.node, r1);
+      const arc = g.filletArc(beforeEntry, R.depEntry.node, r1);
       lineEnd = this.#sOfPoint(f.path, arc.pts.at(-1)) + f.wb + 4;
     }
     f.lineEnd = Math.min(f.path.total, Math.max(lineEnd, f.holdStop + 1));
@@ -1863,26 +2132,41 @@ export class World {
   }
 
   #tryLineUp(f) {
-    const queue = this.flights.filter((g) => g.phase === 'holdShort').sort((a, b) => (b.priority - a.priority) || (a.queuedAt - b.queuedAt));
+    const R = this.runwayOf(f);
+    const queue = this.flights.filter((g) => g.phase === 'holdShort' && this.runwayOf(g) === R).sort((a, b) => (b.priority - a.priority) || (a.queuedAt - b.queuedAt));
     if (queue[0] !== f) {
       f.waiting = `Departure queue: number ${queue.indexOf(f) + 1}`;
       return;
     }
-    const sep = DEP_SEP[this.lastDeparture.wake] * this.#sepFactor();
-    if (this.runwayClosed()) f.waiting = 'Runway closed';
-    else if (this.runwayUser !== null) f.waiting = 'Runway occupied';
-    else if (this.t - this.lastDeparture.t < sep) f.waiting = 'Wake separation';
-    else if (this.#nextArrivalTime() - this.t < 100) f.waiting = 'Arrival on short final';
+    const sep = DEP_SEP[R.lastDeparture.wake] * this.#sepFactor();
+    const gap = this.#departureGap(f);
+    // Take turns: an aircraft that has been waiting to cross since before the last take-off goes next,
+    // if there is a gap for it to go in.
+    const crossersWaiting = this.#nextArrivalTime(R) - this.t > 60 && this.flights.some((x) => x.crossWait === R.ref && (x.crossWaitSince ?? this.t) < R.lastDeparture.t);
+    if (this.#rwClosed(R)) f.waiting = 'Runway closed';
+    else if (R.user !== null) f.waiting = 'Runway occupied';
+    else if (this.t - R.lastDeparture.t < sep) f.waiting = 'Wake separation';
+    else if (this.#nextArrivalTime(R) - this.t < gap) f.waiting = 'Arrival on short final';
+    else if (crossersWaiting) f.waiting = 'Letting traffic cross the runway';
+    else if (this.#usesCrossing(R, 'dep') && this.#crossingBusy(R, gap)) f.waiting = 'Traffic on the crossing runway';
     else {
       f.waiting = null;
-      this.runwayUser = f.id;
+      R.user = f.id;
       this.#releaseRoute(f);
       f.limit = f.lineEnd;
       f.phase = 'lineUp';
-      this.#say(f, false, `runway ${this.active}, line up`);
+      this.#say(f, false, `runway ${R.active}, line up`);
       return;
     }
     if (this.t - f.queuedAt > 600) f.delayCause ??= 'Runway congestion';
+  }
+
+  // Seconds this departure needs before the next arrival: line up, take off and be airborne (when the
+  // runway is free again), plus the arrival's decision point and a margin.
+  #departureGap(f) {
+    const lineUp = Math.max(0, (f.lineEnd ?? f.s) - f.s) / LINE_UP_SPEED;
+    const roll = f.vRot / (f.wake === 'H' ? 1.7 : 2.1);
+    return lineUp + roll + RUNWAY_FREE_ALT_M / 9 + 8 + 10;
   }
 
   #takeoff(f, dt) {
@@ -1891,12 +2175,15 @@ export class World {
     f.s += f.speed * dt;
     if (f.speed > f.vRot) f.alt += 9 * dt; // rotate, then climb
     this.#placeOnRunwayLine(f, f.s);
-    if (f.alt > 120 && this.runwayUser === f.id) {
-      this.runwayUser = null;
-      this.lastDeparture = { t: this.t, wake: f.wake };
+    const R = this.runwayOf(f);
+    if (f.alt > RUNWAY_FREE_ALT_M && R.user === f.id) {
+      R.user = null;
+      R.lastDeparture = { t: this.t, wake: f.wake };
+      R.takeoffs++;
+      R.moves.push(this.t);
       this.#departed(f);
     }
-    if (f.alt > 1200 || f.s > this.frame.length + 12000) {
+    if (f.alt > 1200 || f.s > R.frame.length + 12000) {
       f.phase = 'departed';
       f.doneAt = this.t;
     }
@@ -1971,6 +2258,9 @@ export class World {
         this.#reslotAll();
         break;
       case 'runwayClosed':
+        // Scripted (cyclone crosswinds): nothing lands anywhere.
+        for (const R of this.runways) if (R.mode !== 'off') this.closeRunway(e.minutes, e.text, R.ref);
+        break;
       case 'birdStrike':
         this.closeRunway(e.minutes, e.text);
         break;
@@ -2041,9 +2331,12 @@ export class World {
   }
 
   #checkWind() {
-    const { head, cross } = this.windComponents();
-    if (head < -8) this.note('warn', `Tailwind ${Math.round(-head)} kt on runway ${this.active}: consider switching the runway direction.`, { runway: true });
-    if (cross > 25) this.note('warn', `Crosswind ${Math.round(cross)} kt on runway ${this.active}: above limits for most aircraft.`, { runway: true });
+    for (const R of this.runways) {
+      if (R.mode === 'off') continue;
+      const { head, cross } = this.windComponents(R.active);
+      if (head < -8) this.note('warn', `Tailwind ${Math.round(-head)} kt on runway ${R.active}: consider switching the runway direction.`, { runway: true });
+      if (cross > 25) this.note('warn', `Crosswind ${Math.round(cross)} kt on runway ${R.active}: above limits for most aircraft.`, { runway: true });
+    }
   }
 
   #reslotAll() {
@@ -2051,7 +2344,7 @@ export class World {
     for (const f of inbound) this.#releaseSlot(f);
     for (const f of inbound) {
       this.#bookSlot(f, Math.max(f.eta, this.t + 4 * 60));
-      if (f.slot - f.eta > 50 * 60) this.#divert(f, this.runwayClosed(f.slot - 3600) ? 'Runway closed' : 'Arrival queue too long');
+      if (f.slot - f.eta > 50 * 60) this.#divert(f, this.#rwClosed(this.runwayOf(f), f.slot - 3600) ? 'Runway closed' : 'Arrival queue too long');
     }
   }
 
@@ -2156,45 +2449,113 @@ export class World {
     return { ok: true, message: `Stand ${s.ref} ${s.closed ? 'closed' : 'reopened'}` };
   }
 
-  closeRunway(minutes, reason = 'Runway inspection') {
-    this.closures.push({ from: this.t, to: this.t + minutes * 60, reason });
-    this.note('critical', `${reason} (${minutes} min).`, { runway: true });
-    for (const f of this.flights) if (f.phase === 'final' && f.slot - this.t < minutes * 60 + 60) this.#goAround(f, 'Runway closed');
+  closeRunway(minutes, reason = 'Runway inspection', ref = '07/25') {
+    const R = this.#rwByRef(ref);
+    R.closures.push({ from: this.t, to: this.t + minutes * 60, reason });
+    this.note('critical', `Runway ${R.ref}: ${reason} (${minutes} min).`, { runway: true });
+    for (const f of this.flights) if (f.phase === 'final' && this.runwayOf(f) === R && f.slot - this.t < minutes * 60 + 60) this.#goAround(f, 'Runway closed');
     this.#reslotAll();
-    return { ok: true, message: `Runway closed for ${minutes} min` };
+    return { ok: true, message: `Runway ${R.ref} closed for ${minutes} min` };
   }
 
-  reopenRunway() {
-    if (!this.closures.length) return { ok: false, message: 'Runway is open' };
-    this.closures = [];
-    this.note('info', 'Runway reopened.', { runway: true });
+  reopenRunway(ref = '07/25') {
+    const R = this.#rwByRef(ref);
+    if (!R.closures.length) return { ok: false, message: `Runway ${R.ref} is open` };
+    R.closures = [];
+    this.note('info', `Runway ${R.ref} reopened.`, { runway: true });
     this.#reslotAll();
-    return { ok: true, message: 'Runway reopened' };
+    return { ok: true, message: `Runway ${R.ref} reopened` };
   }
 
-  switchRunway() {
-    if (this.runwayUser !== null) return { ok: false, message: 'Runway in use: try again in a moment' };
-    if (this.flights.some((f) => ['lineUp', 'takeoff', 'landing'].includes(f.phase))) return { ok: false, message: 'Runway in use' };
-    this.active = Object.keys(this.frame.ends).find((d) => d !== this.active);
-    this.#setupRunway();
-    for (const f of this.flights) if (f.phase === 'final') this.#goAround(f, 'Runway direction change');
+  switchRunway(ref = '07/25') {
+    const R = this.#rwByRef(ref);
+    if (R.user !== null) return { ok: false, message: `Runway ${R.ref} in use: try again in a moment` };
+    if (this.flights.some((f) => ['lineUp', 'takeoff', 'landing'].includes(f.phase) && this.runwayOf(f) === R)) return { ok: false, message: `Runway ${R.ref} in use` };
+    R.active = Object.keys(R.frame.ends).find((d) => d !== R.active);
+    this.#setupRunway(R);
+    for (const f of this.flights) if (f.phase === 'final' && this.runwayOf(f) === R) this.#goAround(f, 'Runway direction change');
     this.#reslotAll();
     // Departures already taxiing re-plan from where they are.
-    for (const f of this.flights.filter((x) => ['taxiOut', 'holdShort'].includes(x.phase))) this.#replanDeparture(f);
-    const { head, cross } = this.windComponents();
-    this.note('info', `Runway ${this.active} in use (headwind ${Math.round(head)} kt, crosswind ${Math.round(cross)} kt).`, { runway: true });
-    return { ok: true, message: `Runway ${this.active} now active` };
+    for (const f of this.flights.filter((x) => ['taxiOut', 'holdShort'].includes(x.phase) && this.runwayOf(x) === R)) this.#replanDeparture(f);
+    const { head, cross } = this.windComponents(R.active);
+    this.note('info', `Runway ${R.active} in use (headwind ${Math.round(head)} kt, crosswind ${Math.round(cross)} kt).`, { runway: true });
+    return { ok: true, message: `Runway ${R.active} now active` };
+  }
+
+  // What a runway is used for: 'both', 'arr', 'dep' or 'off'. 07/25 cannot be taken out of use (wide-bodies
+  // have nowhere else to go), and something must always land and take off.
+  setRunwayMode(ref, mode) {
+    const R = this.#rwByRef(ref);
+    if (!RUNWAY_MODES[mode]) return { ok: false, message: 'Unknown runway mode' };
+    if (R === this.main && mode === 'off') return { ok: false, message: 'Runway 07/25 is the only one for wide-bodies: close it for a while instead' };
+    const O = this.#otherRunway(R);
+    const lands = (m) => m === 'both' || m === 'arr';
+    const lifts = (m) => m === 'both' || m === 'dep';
+    if (!lands(mode) && !lands(O.mode)) return { ok: false, message: `Runway ${O.ref} must land traffic first` };
+    if (!lifts(mode) && !lifts(O.mode)) return { ok: false, message: `Runway ${O.ref} must handle take-offs first` };
+    R.mode = mode;
+    this.runwayPlan = Object.keys(RUNWAY_PLANS).find((id) => RUNWAY_PLANS[id].main === this.main.mode && RUNWAY_PLANS[id].second === this.second.mode) ?? 'custom';
+    this.#afterRunwayChange(R);
+    this.note('info', `Runway ${R.ref}: ${RUNWAY_MODES[mode].toLowerCase()}.`, { runway: true });
+    return { ok: true, message: `Runway ${R.ref}: ${RUNWAY_MODES[mode].toLowerCase()}` };
+  }
+
+  // One of RUNWAY_PLANS, for both runways at once.
+  setRunwayPlan(id) {
+    const P = RUNWAY_PLANS[id];
+    if (!P) return { ok: false, message: 'Unknown plan' };
+    this.main.mode = P.main;
+    this.second.mode = P.second;
+    this.runwayPlan = id;
+    for (const R of this.runways) this.#afterRunwayChange(R);
+    this.note('info', `Runway plan: ${P.label}. ${P.text}.`, { runway: true });
+    return { ok: true, message: `Runway plan: ${P.label}` };
+  }
+
+  // After a role change: arrivals and taxiing departures that can no longer use the runway move over.
+  #afterRunwayChange(R) {
+    if (R.mode === 'off' || R.mode === 'dep') {
+      for (const f of this.flights) if (f.phase === 'final' && this.runwayOf(f) === R && this.#fitsRunway(this.#otherRunway(R), f)) this.#goAround(f, `Runway ${R.ref} no longer landing`);
+    }
+    this.#reslotAll();
+    if (R.mode === 'off' || R.mode === 'arr') {
+      for (const f of this.flights.filter((x) => ['taxiOut', 'holdShort'].includes(x.phase) && this.runwayOf(x) === R)) {
+        f.rwy = this.#chooseDeparture(f).ref;
+        this.#replanDeparture(f);
+      }
+    }
+    if (R.mode === 'off' && R.user !== null && !this.flights.some((f) => f.id === R.user && GROUND.has(f.phase))) R.user = null;
+  }
+
+  // Everything the panels show about the runways.
+  runwayState() {
+    return this.runways.map((R) => {
+      const { head, cross } = this.windComponents(R.active);
+      const user = R.user !== null ? this.flights.find((f) => f.id === R.user) : null;
+      R.moves = R.moves.filter((t) => this.t - t < 3600);
+      return {
+        ref: R.ref, active: R.active, other: Object.keys(R.frame.ends).find((d) => d !== R.active), mode: R.mode, length: R.frame.length,
+        closed: this.#rwClosed(R), closure: R.closures[0] ?? null, head, cross, user,
+        queue: this.flights.filter((f) => f.phase === 'holdShort' && this.runwayOf(f) === R).length,
+        crossing: this.flights.filter((f) => f.crossWait === R.ref).length,
+        next: this.flights.filter((f) => ['inbound', 'final'].includes(f.phase) && this.runwayOf(f) === R).sort((a, b) => a.slot - b.slot).slice(0, 4),
+        landings: R.landings, takeoffs: R.takeoffs, lastHour: R.moves.length,
+        usesCrossingArr: this.#usesCrossing(R, 'arr'), usesCrossingDep: this.#usesCrossing(R, 'dep'), wideBodies: R === this.main,
+        displaced: R.displaced[R.active] ?? 0,
+      };
+    });
   }
 
   // Route from `from` (facing away from `prev`) to the departure entry, checked all the way onto
   // the runway: the search goes one runway node further so the line-up turn is a legal one too.
   #departureRoute(from, prev, f = null) {
-    const r1 = this.#runwayNeighbour(this.depEntry.node, 1);
+    const R = f ? this.runwayOf(f) : this.main;
+    const r1 = this.#runwayNeighbour(R.depEntry.node, 1, R);
     if (r1 !== null) {
       const path = this.graph.findPath(from, r1, { ...this.#routeOptions(f), prev });
-      if (path && path.at(-2) === this.depEntry.node) return path.slice(0, -1);
+      if (path && path.at(-2) === R.depEntry.node) return path.slice(0, -1);
     }
-    return this.graph.findPath(from, this.depEntry.node, { ...this.#routeOptions(f), prev });
+    return this.graph.findPath(from, R.depEntry.node, { ...this.#routeOptions(f), prev });
   }
 
   // After a runway direction change: re-route from where the aircraft is, along the lines.
@@ -2341,14 +2702,16 @@ export class World {
         this.note('warn', `Thunderstorm expected around ${hhmmText(storm.t)}: lightning will stop outdoor ramp work.`);
       }
       // Wind limits, at most every half hour.
-      const { head, cross } = this.windComponents();
-      if ((cross > 25 || head < -8) && this.t > this.windWarnUntil) {
+      const inUse = this.runways.filter((R) => R.mode !== 'off').map((R) => ({ R, ...this.windComponents(R.active) }));
+      if (inUse.some((x) => x.cross > 25 || x.head < -8) && this.t > this.windWarnUntil) {
         this.windWarnUntil = this.t + 1800;
         this.#checkWind();
       }
-      if (cross > 33 && !this.runwayClosed() && this.t > this.xwindCool) {
-        this.xwindCool = this.t + 1800;
-        this.closeRunway(25, `Crosswind ${Math.round(cross)} kt: beyond limits, runway closed until it eases.`);
+      for (const { R, cross } of inUse) {
+        if (cross > 33 && !this.#rwClosed(R) && this.t > (R.xwindCool ?? -1)) {
+          R.xwindCool = this.t + 1800;
+          this.closeRunway(25, `Crosswind ${Math.round(cross)} kt on ${R.active}: beyond limits, runway closed until it eases.`, R.ref);
+        }
       }
     }
     this.lowVisNow = vis < 1200;
@@ -2419,11 +2782,15 @@ export class World {
   #autoRunwayTick(force = false) {
     if (!this.autoRunway || (!force && this.t < (this.nextAuto ?? 0))) return;
     this.nextAuto = this.t + 60;
-    const best = this.#bestRunway();
-    if (best === this.active || this.t - this.lastRunwayChange < 30 * 60) return;
-    // Hysteresis: only change for a clear gain (4 kt more headwind).
-    if (this.windComponents(best).head - this.windComponents(this.active).head < 4) return;
-    if (this.switchRunway().ok) this.lastRunwayChange = this.t;
+    if (this.t - this.lastRunwayChange < 30 * 60) return;
+    for (const R of this.runways) {
+      if (R.mode === 'off') continue;
+      const best = this.#bestRunway(R);
+      if (best === R.active) continue;
+      // Hysteresis: only change for a clear gain (4 kt more headwind).
+      if (this.windComponents(best).head - this.windComponents(R.active).head < 4) continue;
+      if (this.switchRunway(R.ref).ok) this.lastRunwayChange = this.t;
+    }
   }
 
   // ---- projects (career) ----------------------------------------------------------------------
@@ -2549,6 +2916,7 @@ export class World {
       satisfaction: this.satisfaction(),
       causes: Object.entries(this.dayCauses).sort((x, y) => y[1] - x[1]).slice(0, 4),
       finance: this.ledger.closeDay(),
+      runways: this.runways.map((R) => ({ ref: R.ref, landings: R.landings, takeoffs: R.takeoffs })),
       tariff: this.tariff,
       weather: { ...this.dayWx, season: this.weather.month, mode: this.weatherMode },
       airlines: Object.entries(this.airDay).map(([code, a]) => ({ code, ...a })).sort((x, y) => y.dep - x.dep),
@@ -2562,6 +2930,10 @@ export class World {
     this.dayCauses = {};
     this.airDay = {};
     this.dayWx = freshDayWx();
+    for (const R of this.runways) {
+      R.landings = 0;
+      R.takeoffs = 0;
+    }
     this.note('info', `Day ${report.day} report is ready.`);
   }
 
@@ -2594,8 +2966,9 @@ export class World {
     const stands = this.stands.map((s) => ({ id: s.id, locked: s.locked ?? null, closed: s.closed, occupant: s.occupant, bookings: s.bookings, contact: s.contact, kind: s.kind, bridge: s.bridge ?? null }));
     return structuredClone({
       v: 1, scenarioId: this.scenarioId, daySeed: this.daySeed, t0: this.t0, t: this.t, rng: this.rnd.getState(),
-      wind: this.wind, active: this.active, closures: this.closures, arrSlots: this.arrSlots,
-      edgeUse: [...this.edgeUse].map(([k, m]) => [k, [...m]]), runwayUser: this.runwayUser, lastDeparture: this.lastDeparture,
+      wind: this.wind, runwayPlan: this.runwayPlan,
+      runways: this.runways.map((R) => ({ ref: R.ref, active: R.active, mode: R.mode, user: R.user, closures: R.closures, arrSlots: R.arrSlots, lastDeparture: R.lastDeparture, landings: R.landings, takeoffs: R.takeoffs, moves: R.moves, xwindCool: R.xwindCool ?? -1 })),
+      edgeUse: [...this.edgeUse].map(([k, m]) => [k, [...m]]),
       mods: this.mods, pool: this.pool, crews: this.crews, money: this.money, vehicles: this.vehicles, nextVehicleId: this.nextVehicleId,
       log: this.log, kpi: this.kpi, events: this.events, flights: this.flights, days: [...this.days], stands,
       term: this.term.snapshot(), perks: this.perks, projects: this.projects, dayIndex: this.dayIndex, dayBase: this.dayBase,
@@ -2608,8 +2981,7 @@ export class World {
     const s = structuredClone(snap);
     if (s.v !== 1) throw new Error('Unsupported save version');
     Object.assign(this, {
-      daySeed: s.daySeed, t0: s.t0, t: s.t, wind: s.wind, active: s.active, closures: s.closures, arrSlots: s.arrSlots,
-      runwayUser: s.runwayUser, lastDeparture: s.lastDeparture, mods: s.mods, pool: s.pool, crews: s.crews, money: s.money,
+      daySeed: s.daySeed, t0: s.t0, t: s.t, wind: s.wind, runwayPlan: s.runwayPlan ?? 'single', mods: s.mods, pool: s.pool, crews: s.crews, money: s.money,
       vehicles: s.vehicles, nextVehicleId: s.nextVehicleId, log: s.log, kpi: s.kpi, events: s.events, flights: s.flights,
       days: new Set(s.days), perks: s.perks, projects: s.projects, dayIndex: s.dayIndex, dayBase: s.dayBase,
       dayCauses: s.dayCauses, airDay: s.airDay ?? {}, dayWx: s.dayWx ?? freshDayWx(), ledger: Ledger.restore(s.ledger), tariff: s.tariff ?? 'standard', windBase: s.windBase ?? s.wind, weatherMode: s.weatherMode ?? 'random', lighting: s.lighting ?? { apron: 'auto', runway: 'auto', dark: null, rwyFaultUntil: -1 }, rampClosedUntil: s.rampClosedUntil ?? -1, pendingReport: s.pendingReport, reports: s.reports, autoRunway: s.autoRunway,
@@ -2622,7 +2994,14 @@ export class World {
     this.#environment(true);
     this.edgeUse = new Map(s.edgeUse.map(([k, m]) => [k, new Map(m)]));
     this.rnd.setState(s.rng);
-    this.#setupRunway();
+    // Saves from before the second runway keep it out of use.
+    const saved = s.runways ?? [{ ref: '07/25', active: s.active, mode: 'both', user: s.runwayUser, closures: s.closures, arrSlots: s.arrSlots, lastDeparture: s.lastDeparture }, { ref: '12/30', mode: 'off' }];
+    for (const r of saved) {
+      const R = this.#rwByRef(r.ref);
+      Object.assign(R, { active: r.active ?? R.active, mode: r.mode, user: r.user ?? null, closures: r.closures ?? [], arrSlots: r.arrSlots ?? [], lastDeparture: r.lastDeparture ?? { t: -1e9, wake: 'M' }, landings: r.landings ?? 0, takeoffs: r.takeoffs ?? 0, moves: r.moves ?? [], xwindCool: r.xwindCool ?? -1 });
+      this.#setupRunway(R);
+    }
+    this.flowPlanFor = null;
     for (const st of s.stands) {
       const stand = this.standById.get(st.id);
       if (!stand) continue;

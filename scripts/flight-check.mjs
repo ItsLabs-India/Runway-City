@@ -8,7 +8,7 @@ import { AIRCRAFT_TYPES } from '../src/sim/aircraftTypes.js';
 
 const map = JSON.parse(await readFile(new URL('../public/data/maa-map.json', import.meta.url), 'utf8'));
 const w = new World(map, { scenarioId: 'normal', startTime: Date.UTC(2026, 9, 29, 0, 30), weatherMode: 'calm' });
-const ORDER = ['Status', 'Live data', 'Route', 'Timeline', 'Aircraft', 'Stand and turnaround', 'Passengers', 'Conditions'];
+const ORDER = ['Status', 'Route', 'Timeline', 'Stand and turnaround', 'Passengers', 'Live data', 'Aircraft', 'Conditions'];
 const phases = new Set();
 let rendered = 0;
 let live = 0;

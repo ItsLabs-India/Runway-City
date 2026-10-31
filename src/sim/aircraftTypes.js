@@ -5,6 +5,7 @@
 // give them. src/sim/airframe.js turns this into the geometry that both the drawing and the
 // collision footprints use, so what you see is what the simulation collides.
 //
+//   height       ground to the top of the fin (for shadows)
 //   width        fuselage diameter           noseGear   nose gear ahead of the centre, fraction of length
 //   wheelbase    nose gear to main gear (m)  code       ICAO aerodrome reference code letter (stand size)
 //   wing         root = wing leading edge at the fuselage; chords at root / kink / tip; leading-edge
@@ -21,7 +22,7 @@
 export const AIRCRAFT_TYPES = {
   AT76: {
     name: 'ATR 72-600', maker: 'ATR', engineModel: 'Pratt & Whitney Canada PW127M', props: true, engines: 2,
-    length: 27.17, span: 27.05, width: 2.87, mtow: 23, seats: 72, wake: 'M', code: 'C', turnMin: 25, approachKt: 115, rotateKt: 105,
+    length: 27.17, span: 27.05, height: 7.65, width: 2.87, mtow: 23, seats: 72, wake: 'M', code: 'C', turnMin: 25, approachKt: 115, rotateKt: 105,
     noseGear: 0.39, wheelbase: 10.8,
     wing: { root: 11.2, rootChord: 2.75, tipChord: 1.55, sweep: 3, tip: null, highWing: true },
     stab: { root: 23.2, span: 7.3, rootChord: 1.9, tipChord: 1.25, sweep: 8 },
@@ -32,7 +33,7 @@ export const AIRCRAFT_TYPES = {
   },
   DH8D: {
     name: 'De Havilland Dash 8-400', maker: 'De Havilland Canada', engineModel: 'Pratt & Whitney Canada PW150A', props: true, engines: 2,
-    length: 32.83, span: 28.42, width: 2.69, mtow: 29.3, seats: 78, wake: 'M', code: 'C', turnMin: 25, approachKt: 118, rotateKt: 108,
+    length: 32.83, span: 28.42, height: 8.34, width: 2.69, mtow: 29.3, seats: 78, wake: 'M', code: 'C', turnMin: 25, approachKt: 118, rotateKt: 108,
     noseGear: 0.378, wheelbase: 12.75,
     wing: { root: 12.8, rootChord: 3.25, tipChord: 1.35, sweep: 3, tip: null, highWing: true },
     stab: { root: 28.4, span: 9.8, rootChord: 2.2, tipChord: 1.4, sweep: 8 },
@@ -43,7 +44,7 @@ export const AIRCRAFT_TYPES = {
   },
   A20N: {
     name: 'Airbus A320neo', maker: 'Airbus', engineModel: 'CFM LEAP-1A', engines: 2,
-    length: 37.57, span: 35.8, width: 3.95, mtow: 79, seats: 186, wake: 'M', code: 'C', turnMin: 40, approachKt: 135, rotateKt: 145,
+    length: 37.57, span: 35.8, height: 11.76, width: 3.95, mtow: 79, seats: 186, wake: 'M', code: 'C', turnMin: 40, approachKt: 135, rotateKt: 145,
     noseGear: 0.375, wheelbase: 12.6,
     wing: { root: 13.6, rootChord: 5.9, kink: 0.34, kinkChord: 3.7, tipChord: 1.45, sweep: 28, tip: { kind: 'sharklet', chord: 1.5 } },
     stab: { root: 29.3, span: 12.45, rootChord: 3.6, tipChord: 1.2, sweep: 29 },
@@ -54,7 +55,7 @@ export const AIRCRAFT_TYPES = {
   },
   B738: {
     name: 'Boeing 737-800', maker: 'Boeing', engineModel: 'CFM56-7B', engines: 2,
-    length: 39.5, span: 35.8, width: 3.76, mtow: 79, seats: 189, wake: 'M', code: 'C', turnMin: 40, approachKt: 140, rotateKt: 150,
+    length: 39.5, span: 35.8, height: 12.5, width: 3.76, mtow: 79, seats: 189, wake: 'M', code: 'C', turnMin: 40, approachKt: 140, rotateKt: 150,
     noseGear: 0.376, wheelbase: 15.6,
     wing: { root: 15.0, rootChord: 6.8, kink: 0.33, kinkChord: 4.1, tipChord: 1.6, sweep: 27, tip: { kind: 'blended', chord: 1.7 } },
     stab: { root: 31.6, span: 14.35, rootChord: 3.7, tipChord: 1.3, sweep: 33 },
@@ -65,7 +66,7 @@ export const AIRCRAFT_TYPES = {
   },
   B38M: {
     name: 'Boeing 737 MAX 8', maker: 'Boeing', engineModel: 'CFM LEAP-1B', engines: 2,
-    length: 39.52, span: 35.92, width: 3.76, mtow: 82.2, seats: 189, wake: 'M', code: 'C', turnMin: 40, approachKt: 140, rotateKt: 150,
+    length: 39.52, span: 35.92, height: 12.3, width: 3.76, mtow: 82.2, seats: 189, wake: 'M', code: 'C', turnMin: 40, approachKt: 140, rotateKt: 150,
     noseGear: 0.376, wheelbase: 15.6,
     wing: { root: 15.0, rootChord: 6.8, kink: 0.33, kinkChord: 4.1, tipChord: 1.6, sweep: 27, tip: { kind: 'split', chord: 2.2 } },
     stab: { root: 31.6, span: 14.35, rootChord: 3.7, tipChord: 1.3, sweep: 33 },
@@ -76,7 +77,7 @@ export const AIRCRAFT_TYPES = {
   },
   A21N: {
     name: 'Airbus A321neo', maker: 'Airbus', engineModel: 'CFM LEAP-1A', engines: 2,
-    length: 44.51, span: 35.8, width: 3.95, mtow: 97, seats: 222, wake: 'M', code: 'C', turnMin: 45, approachKt: 140, rotateKt: 155,
+    length: 44.51, span: 35.8, height: 11.76, width: 3.95, mtow: 97, seats: 222, wake: 'M', code: 'C', turnMin: 45, approachKt: 140, rotateKt: 155,
     noseGear: 0.394, wheelbase: 16.9,
     wing: { root: 16.3, rootChord: 5.9, kink: 0.34, kinkChord: 3.7, tipChord: 1.45, sweep: 28, tip: { kind: 'sharklet', chord: 1.5 } },
     stab: { root: 36.0, span: 12.45, rootChord: 3.6, tipChord: 1.2, sweep: 29 },
@@ -87,7 +88,7 @@ export const AIRCRAFT_TYPES = {
   },
   B788: {
     name: 'Boeing 787-8', maker: 'Boeing', engineModel: 'GEnx-1B / Trent 1000', engines: 2,
-    length: 56.72, span: 60.12, width: 5.77, mtow: 227.9, seats: 242, wake: 'H', code: 'E', turnMin: 80, approachKt: 140, rotateKt: 155,
+    length: 56.72, span: 60.12, height: 16.9, width: 5.77, mtow: 227.9, seats: 242, wake: 'H', code: 'E', turnMin: 80, approachKt: 140, rotateKt: 155,
     noseGear: 0.341, wheelbase: 22.3,
     wing: { root: 21.4, rootChord: 10.6, kink: 0.3, kinkChord: 6.6, tipChord: 1.9, sweep: 32, rake: { frac: 0.08, extra: 22 }, tip: { kind: 'raked' } },
     stab: { root: 45.6, span: 18.26, rootChord: 6.0, tipChord: 2.1, sweep: 34 },
@@ -98,7 +99,7 @@ export const AIRCRAFT_TYPES = {
   },
   B789: {
     name: 'Boeing 787-9', maker: 'Boeing', engineModel: 'GEnx-1B / Trent 1000', engines: 2,
-    length: 62.81, span: 60.12, width: 5.77, mtow: 254, seats: 290, wake: 'H', code: 'E', turnMin: 90, approachKt: 145, rotateKt: 160,
+    length: 62.81, span: 60.12, height: 17, width: 5.77, mtow: 254, seats: 290, wake: 'H', code: 'E', turnMin: 90, approachKt: 145, rotateKt: 160,
     noseGear: 0.347, wheelbase: 25.9,
     wing: { root: 24.6, rootChord: 10.6, kink: 0.3, kinkChord: 6.6, tipChord: 1.9, sweep: 32, rake: { frac: 0.08, extra: 22 }, tip: { kind: 'raked' } },
     stab: { root: 51.6, span: 18.26, rootChord: 6.0, tipChord: 2.1, sweep: 34 },
@@ -109,7 +110,7 @@ export const AIRCRAFT_TYPES = {
   },
   A359: {
     name: 'Airbus A350-900', maker: 'Airbus', engineModel: 'Rolls-Royce Trent XWB-84', engines: 2,
-    length: 66.8, span: 64.75, width: 5.96, mtow: 283, seats: 315, wake: 'H', code: 'E', turnMin: 90, approachKt: 145, rotateKt: 160,
+    length: 66.8, span: 64.75, height: 17.05, width: 5.96, mtow: 283, seats: 315, wake: 'H', code: 'E', turnMin: 90, approachKt: 145, rotateKt: 160,
     noseGear: 0.358, wheelbase: 28.6,
     wing: { root: 26.2, rootChord: 11.4, kink: 0.32, kinkChord: 7.0, tipChord: 2.0, sweep: 32, rake: { frac: 0.1, extra: 14 }, tip: { kind: 'curved', chord: 1.6 } },
     stab: { root: 56.2, span: 17.05, rootChord: 5.6, tipChord: 1.8, sweep: 35 },
@@ -120,7 +121,7 @@ export const AIRCRAFT_TYPES = {
   },
   A343: {
     name: 'Airbus A340-300', maker: 'Airbus', engineModel: 'CFM56-5C', engines: 4,
-    length: 63.69, span: 60.3, width: 5.64, mtow: 276.5, seats: 295, wake: 'H', code: 'E', turnMin: 90, approachKt: 145, rotateKt: 160,
+    length: 63.69, span: 60.3, height: 16.99, width: 5.64, mtow: 276.5, seats: 295, wake: 'H', code: 'E', turnMin: 90, approachKt: 145, rotateKt: 160,
     noseGear: 0.367, wheelbase: 25.4,
     wing: { root: 25.4, rootChord: 11.0, kink: 0.34, kinkChord: 7.0, tipChord: 2.3, sweep: 31, tip: { kind: 'blended', chord: 2.2 } },
     stab: { root: 54.2, span: 18.5, rootChord: 5.5, tipChord: 1.9, sweep: 33 },
@@ -131,7 +132,7 @@ export const AIRCRAFT_TYPES = {
   },
   B77W: {
     name: 'Boeing 777-300ER', maker: 'Boeing', engineModel: 'GE90-115B', engines: 2,
-    length: 73.86, span: 64.8, width: 6.2, mtow: 351.5, seats: 360, wake: 'H', code: 'E', turnMin: 100, approachKt: 150, rotateKt: 165,
+    length: 73.86, span: 64.8, height: 18.5, width: 6.2, mtow: 351.5, seats: 360, wake: 'H', code: 'E', turnMin: 100, approachKt: 150, rotateKt: 165,
     noseGear: 0.365, wheelbase: 31.2,
     wing: { root: 29.2, rootChord: 13.6, kink: 0.36, kinkChord: 8.4, tipChord: 2.3, sweep: 35, rake: { frac: 0.07, extra: 20 }, tip: { kind: 'raked' } },
     stab: { root: 62.4, span: 21.3, rootChord: 7.0, tipChord: 2.5, sweep: 36 },
@@ -144,7 +145,7 @@ export const AIRCRAFT_TYPES = {
   // the wing), same wing and GE90 engines, one crew door and no cabin windows.
   B77F: {
     name: 'Boeing 777 Freighter', maker: 'Boeing', engineModel: 'GE90-110B1', engines: 2,
-    length: 63.73, span: 64.8, width: 6.2, mtow: 347.8, seats: 0, wake: 'H', code: 'E', turnMin: 120, approachKt: 149, rotateKt: 165,
+    length: 63.73, span: 64.8, height: 18.6, width: 6.2, mtow: 347.8, seats: 0, wake: 'H', code: 'E', turnMin: 120, approachKt: 149, rotateKt: 165,
     noseGear: 0.359, wheelbase: 25.9,
     wing: { root: 23.9, rootChord: 13.6, kink: 0.36, kinkChord: 8.4, tipChord: 2.3, sweep: 35, rake: { frac: 0.07, extra: 20 }, tip: { kind: 'raked' } },
     stab: { root: 52.3, span: 21.3, rootChord: 7.0, tipChord: 2.5, sweep: 36 },
@@ -157,7 +158,7 @@ export const AIRCRAFT_TYPES = {
   // ---- General aviation ----------------------------------------------------------------------------
   B350: {
     name: 'Beechcraft King Air 350', maker: 'Textron Aviation', engineModel: 'Pratt & Whitney Canada PT6A-60A', props: true, engines: 2,
-    length: 14.22, span: 17.65, width: 1.6, mtow: 6.8, seats: 9, wake: 'L', code: 'B', turnMin: 20, approachKt: 100, rotateKt: 95,
+    length: 14.22, span: 17.65, height: 4.37, width: 1.6, mtow: 6.8, seats: 9, wake: 'L', code: 'B', turnMin: 20, approachKt: 100, rotateKt: 95,
     noseGear: 0.366, wheelbase: 4.9,
     wing: { root: 5.4, rootChord: 2.2, tipChord: 1.0, sweep: 2, tip: null },
     stab: { root: 12.4, span: 5.6, rootChord: 1.5, tipChord: 0.9, sweep: 15 },
@@ -168,7 +169,7 @@ export const AIRCRAFT_TYPES = {
   },
   C56X: {
     name: 'Cessna Citation XLS+', maker: 'Textron Aviation', engineModel: 'Pratt & Whitney Canada PW545C', engines: 2,
-    length: 15.98, span: 17.17, width: 1.7, mtow: 9.2, seats: 9, wake: 'L', code: 'B', turnMin: 20, approachKt: 115, rotateKt: 110,
+    length: 15.98, span: 17.17, height: 5.2, width: 1.7, mtow: 9.2, seats: 9, wake: 'L', code: 'B', turnMin: 20, approachKt: 115, rotateKt: 110,
     noseGear: 0.344, wheelbase: 6.3,
     wing: { root: 5.9, rootChord: 2.6, tipChord: 1.1, sweep: 4, tip: null },
     stab: { root: 13.2, span: 6.4, rootChord: 1.5, tipChord: 0.8, sweep: 22 },
@@ -179,7 +180,7 @@ export const AIRCRAFT_TYPES = {
   },
   CL60: {
     name: 'Bombardier Challenger 650', maker: 'Bombardier', engineModel: 'GE CF34-3B', engines: 2,
-    length: 20.86, span: 19.61, width: 2.69, mtow: 21.9, seats: 12, wake: 'M', code: 'B', turnMin: 25, approachKt: 125, rotateKt: 125,
+    length: 20.86, span: 19.61, height: 6.3, width: 2.69, mtow: 21.9, seats: 12, wake: 'M', code: 'B', turnMin: 25, approachKt: 125, rotateKt: 125,
     noseGear: 0.356, wheelbase: 8.0,
     wing: { root: 7.9, rootChord: 3.9, tipChord: 1.1, sweep: 28, tip: { kind: 'blended', chord: 0.9 } },
     stab: { root: 18.0, span: 6.2, rootChord: 2.0, tipChord: 1.0, sweep: 35 },

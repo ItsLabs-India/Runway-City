@@ -224,7 +224,10 @@ function select(sel, centre = false) {
       camera.setView({ x: st.x, y: st.y, scale: Math.max(camera.scale, 1.6) });
     }
   }
-  if (centre && sel?.type === 'runway') camera.setView({ x: (world.frame.ends['07'][0] + world.frame.ends['25'][0]) / 2, y: (world.frame.ends['07'][1] + world.frame.ends['25'][1]) / 2, scale: 0.35 });
+  if (centre && sel?.type === 'runway') {
+    // The top-bar figure opens the control for both runways; a runway clicked on the map keeps the view.
+    camera.setView({ x: (world.main.frame.ends['07'][0] + world.main.frame.ends['25'][0]) / 2, y: (world.main.frame.ends['07'][1] + world.second.frame.ends['12'][1]) / 2, scale: 0.2 });
+  }
   refresh();
 }
 
@@ -325,13 +328,21 @@ function act(action, arg) {
       report(world.toggleStand(Number(arg)));
       break;
     case 'switchRunway':
-      report(world.switchRunway());
+      report(world.switchRunway(arg || '07/25'));
       break;
     case 'inspectRunway':
-      report(world.closeRunway(15, 'Runway inspection ordered'));
+      report(world.closeRunway(15, 'Runway inspection ordered', arg || '07/25'));
       break;
     case 'reopenRunway':
-      report(world.reopenRunway());
+      report(world.reopenRunway(arg || '07/25'));
+      break;
+    case 'runwayMode': {
+      const [ref, mode] = arg.split(':');
+      report(world.setRunwayMode(ref, mode));
+      break;
+    }
+    case 'runwayPlan':
+      report(world.setRunwayPlan(arg));
       break;
     // fleets and crews
     case 'buy': {
@@ -360,6 +371,7 @@ function act(action, arg) {
       } catch {
         // private mode: the choice just is not remembered
       }
+      if (hud.modalKind === 'menu') openMenu(menuCanClose);
       break;
     case 'traffic':
       try {

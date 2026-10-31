@@ -125,9 +125,10 @@ function passengers(w, f) {
 
 function conditions(w, f) {
   const x = w.weather.now;
-  const { head, cross } = w.windComponents();
+  const RW = w.runwayOf(f);
+  const { head, cross } = w.windComponents(RW.active);
   const lines = [
-    `Runway in use <b>${esc(w.active)}</b> · headwind ${Math.round(head)} kt, crosswind ${Math.round(cross)} kt`,
+    `Runway <b>${esc(RW.active)}</b> · headwind ${Math.round(head)} kt, crosswind ${Math.round(cross)} kt`,
     `Weather <b>${esc(x.label)}</b>, ${Math.round(x.tempC)} °C, visibility ${km(w.visibility())}${w.rampClosed ? ' · <span class="warn">ramp closed (lightning)</span>' : ''}`,
     `Light <b>${esc(w.lights.phase)}</b>${w.lights.night ? ' · apron lights ' + (w.lights.apron ? 'on' : 'off') : ''}`,
   ];
@@ -194,14 +195,20 @@ export function flightDetails(w, f, ui = null) {
     <span>Terminal <b>${esc(f.service === 'cargo' ? 'Cargo Terminal' : f.service === 'ga' ? 'GA lounge' : term?.name ?? '–')}</b></span><span>Stand size <b>${t.code === 'E' ? 'wide-body' : t.code === 'B' ? 'business / light' : 'narrow-body'}</b></span></div>${groundLines(w, f, stand)}${turnaround(w, f)}`;
 
   const sec = (title, body) => `<section class="fd-sec"><h4>${title}</h4>${body}</section>`;
+  // Reference sections fold away; the player's choice is remembered while the card refreshes.
+  const fold = (title, body, open) => `<details class="fd-sec" ${sectionOpen.get(title) ?? open ? 'open' : ''}><summary data-sec="${title}"><h4>${title}</h4></summary>${body}</details>`;
+  const moving = !['atStand', 'scheduled', 'departed', 'cancelled', 'diverted'].includes(f.phase);
   return [
     sec('Status', status),
-    sec('Live data', liveData(w, f, ui)),
     sec('Route', route),
     sec('Timeline', timeline(w, f)),
-    sec('Aircraft', aircraft),
     sec('Stand and turnaround', ground),
     sec('Passengers', passengers(w, f)),
-    sec('Conditions', conditions(w, f)),
+    fold('Live data', liveData(w, f, ui), moving),
+    fold('Aircraft', aircraft, false),
+    fold('Conditions', conditions(w, f), false),
   ].join('');
 }
+
+const sectionOpen = new Map();
+export const setSectionOpen = (title, open) => sectionOpen.set(title, open);

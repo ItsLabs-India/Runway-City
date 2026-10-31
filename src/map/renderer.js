@@ -4,14 +4,14 @@ import {
   runwayFrames, holdShortLines, rooftopUnits,
   trees, parkedCars, floodlights, emergencyVehicles, edgeLights,
 } from './props.js';
-import { drawAircraft, drawVehicle, drawCar } from './sprites.js';
-import { drawPerson, drawJetBridge } from './apronSprites.js';
+import { drawAircraft, drawAircraftShadow, drawVehicle, drawCar, SHADOW_STRENGTH } from './sprites.js';
+import { drawPerson, drawJetBridge, drawJetBridgeShadow } from './apronSprites.js';
 import { bbox, overlaps, polygonArea, centroid, polylineLength, alongPolyline } from './geometry.js';
 import { AIRCRAFT_TYPES } from '../sim/aircraftTypes.js';
 import { brandOf, onColour } from '../sim/brands.js';
 import { logoImage } from '../logos.js';
 import { Atmosphere } from './atmosphere.js';
-import { shadowOf } from '../sim/sky.js';
+import { shadowOf, sunShadow, directSun } from '../sim/sky.js';
 
 const shown = (s) => !s.locked && s.usable !== false;
 
@@ -108,8 +108,8 @@ export class MapRenderer {
       this.world = this.#build();
       this.layerKey = '';
     }
-    this.sun = sim.sun();
-    const sunKey = this.sun.el <= 0 ? 'n' : `${Math.round(this.sun.az / 4)}:${Math.round(this.sun.el / 4)}`;
+    this.sun = { ...sim.sun(), clear: directSun(sim.weather?.now) };
+    const sunKey = this.sun.el <= 0 ? 'n' : `${Math.round(this.sun.az / 4)}:${Math.round(this.sun.el / 4)}:${Math.round(this.sun.clear * 6)}`;
     const key = `${camera.x.toFixed(2)},${camera.y.toFixed(2)},${camera.scale.toFixed(5)},${this.canvas.width}x${this.canvas.height},${this.t3},${sunKey}`;
     if (key !== this.layerKey) {
       this.#drawStatic(camera);
@@ -122,7 +122,7 @@ export class MapRenderer {
     ctx.drawImage(this.layer, 0, 0);
     this.atmos.ground(ctx, camera, sim, this.dpr); // cloud shadows, wet ground, fog
     camera.applyTo(ctx, this.dpr);
-    const shadow = shadowOf(this.sun, 12);
+    const shadow = sunShadow(this.sun);
     const vehicles = s > 0.3 ? sim.vehicleSprites() : [];
 
     const flights = sim.visibleFlights();
@@ -131,21 +131,23 @@ export class MapRenderer {
 
     if (ui.heat !== false) this.#drawTerminalHeat(ctx, sim, camera);
     this.#drawStandStatus(ctx, sim, ui, camera);
-    if (sim.runwayClosed()) this.#drawRunwayClosed(ctx, camera);
+    this.#drawRunwayClosed(ctx, camera, sim);
+
+    const ground = flights.filter((f) => f.alt <= 0.5);
+    const air = flights.filter((f) => f.alt > 0.5);
+    this.#drawShadowLayer(ctx, camera, sim, ground, shadow, view);
 
     // Layering, bottom to top: ground vehicles, aircraft on the ground, jet bridges (elevated,
     // they meet the aircraft door), aircraft in the air.
     if (s > 0.5) {
       for (const v of vehicles) {
         if ((v.kind === 'cone' && s < 1.2) || !inView(v, view, 15)) continue;
-        drawVehicle(ctx, v, s, sim.t);
+        drawVehicle(ctx, v, s, sim.t, shadow);
       }
     }
-    const ground = flights.filter((f) => f.alt <= 0.5);
-    const air = flights.filter((f) => f.alt > 0.5);
     for (const f of ground) {
       if (!inView(f, view, 80)) continue;
-      drawAircraft(ctx, f, s, { selected: f === selectedFlight, moving: f.phase !== 'atStand', time, shadow });
+      drawAircraft(ctx, f, s, { selected: f === selectedFlight, moving: f.phase !== 'atStand', time, shadow: null });
     }
     if (s > 0.6) {
       for (const p of sim.staffSprites()) if (inView(p, view, 10)) drawPerson(ctx, p, s, sim.t);
@@ -198,10 +200,39 @@ export class MapRenderer {
         airTag(ctx, f.airline, outbound ? f.depNo : f.arrNo, sx + 14, sy - 14, f.waiting ? '#ff9f43' : '#f2c230', s > 1.4 ? brandOf(f.airline).short : '');
       }
     }
+    this.#drawRunwayTags(ctx, camera, sim);
     drawScaleBar(ctx, camera);
   }
 
   // Working jet bridges: they drive out to the door and back (World.jetBridgeSprites).
+  // Shadows of aircraft on the ground and of jet bridges, drawn opaque on their own layer and laid over
+  // the ground once: a shadow is one shadow, however many things cast it.
+  #drawShadowLayer(ctx, camera, sim, ground, u, view) {
+    if (u.alpha < 0.02 || camera.scale < 0.12) return;
+    const layer = (this.shadowLayer ??= document.createElement('canvas'));
+    if (layer.width !== this.canvas.width || layer.height !== this.canvas.height) {
+      layer.width = this.canvas.width;
+      layer.height = this.canvas.height;
+    }
+    const lc = (this.shadowCtx ??= layer.getContext('2d'));
+    lc.setTransform(1, 0, 0, 1, 0, 0);
+    lc.clearRect(0, 0, layer.width, layer.height);
+    camera.applyTo(lc, this.dpr);
+    lc.fillStyle = 'rgb(20,25,20)';
+    const reach = 80 + 80 * Math.hypot(u.ux, u.uy);
+    for (const f of ground) if (inView(f, view, reach)) drawAircraftShadow(lc, f, u, 0, true);
+    if (camera.scale > 0.25) {
+      for (const b of sim.jetBridgeSprites()) {
+        if (inView({ x: b.rotunda[0], y: b.rotunda[1] }, view, 90)) drawJetBridgeShadow(lc, b, u);
+      }
+    }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = SHADOW_STRENGTH * u.alpha;
+    ctx.drawImage(layer, 0, 0);
+    ctx.restore();
+  }
+
   #drawJetBridges(ctx, sim, s, view) {
     if (s < 0.25) return;
     for (const b of sim.jetBridgeSprites()) {
@@ -265,21 +296,42 @@ export class MapRenderer {
     if (st) ring(st.x, st.y, Math.max(12, 14 / s), '#f2c230', Math.max(1.5, 3 / s));
   }
 
-  #drawRunwayClosed(ctx, camera) {
+  // Red crosses on a closed runway; amber crosses on one that is not in use.
+  #drawRunwayClosed(ctx, camera, sim) {
     const s = camera.scale;
-    for (const frame of this.world.frames) {
-      if (frame.ref !== '07/25') continue;
-      for (const end of Object.values(frame.ends)) {
-        const r = 22;
-        ctx.strokeStyle = '#d93025';
-        ctx.lineWidth = Math.max(4, 6 / s);
-        ctx.beginPath();
-        ctx.moveTo(end[0] - r, end[1] - r);
-        ctx.lineTo(end[0] + r, end[1] + r);
-        ctx.moveTo(end[0] + r, end[1] - r);
-        ctx.lineTo(end[0] - r, end[1] + r);
-        ctx.stroke();
+    for (const R of sim.runways) {
+      const closed = sim.runwayClosed(sim.t, R.ref);
+      if (!closed && R.mode !== 'off') continue;
+      const len = R.frame.length;
+      const [a, b] = Object.values(R.frame.ends);
+      const r = 18;
+      ctx.strokeStyle = closed ? '#d93025' : '#e8a33d';
+      ctx.lineWidth = Math.max(3, 5 / s);
+      ctx.beginPath();
+      for (const k of [0.04, 0.5, 0.96]) {
+        const x = a[0] + (b[0] - a[0]) * k;
+        const y = a[1] + (b[1] - a[1]) * k;
+        ctx.moveTo(x - r, y - r);
+        ctx.lineTo(x + r, y + r);
+        ctx.moveTo(x + r, y - r);
+        ctx.lineTo(x - r, y + r);
       }
+      ctx.stroke();
+      void len;
+    }
+  }
+
+  // A label at the threshold in use: designator and role, green while landing, blue for take-offs only.
+  #drawRunwayTags(ctx, camera, sim) {
+    if (camera.scale < 0.05) return;
+    for (const R of sim.runways) {
+      const [ex, ey] = R.frame.ends[R.active];
+      const [sx, sy] = camera.worldToScreen(ex, ey);
+      if (sx < -80 || sy < -30 || sx > camera.width + 20 || sy > camera.height + 30) continue;
+      const closed = sim.runwayClosed(sim.t, R.ref);
+      const role = R.mode === 'off' ? 'not in use' : closed ? 'closed' : { both: 'land + take off', arr: 'landing', dep: 'take-off' }[R.mode];
+      const colour = closed ? '#ff6b5e' : R.mode === 'off' ? '#e8a33d' : R.mode === 'dep' ? '#7fc4ff' : '#5fe08a';
+      tag(ctx, R.mode === 'off' ? `${R.ref} ${role}` : `RWY ${R.active} ${role}`, sx + 10, sy - 12, colour);
     }
   }
 
@@ -304,7 +356,7 @@ export class MapRenderer {
         } else {
           inside = h.isPointInPath(f.path, x, y);
         }
-        if (inside) return f.runway ? { type: 'runway' } : { type: 'info', info: f.info };
+        if (inside) return f.runway ? { type: 'runway', ref: f.runway } : { type: 'info', info: f.info };
       }
     }
     return null;
@@ -380,11 +432,7 @@ export class MapRenderer {
     // Zones: hatched no-build enclaves and the T3 construction site.
     for (const z of w.zones) {
       if (z.kind === 'construction' && this.t3 === 'done') {
-        ctx.fillStyle = C.shadow;
-        ctx.save();
-        ctx.translate(11, 11);
-        ctx.fill(z.path);
-        ctx.restore();
+        fillBuildingShadow(ctx, z.polygon, shadowOf(this.sun, 14));
         ctx.fillStyle = ROOFS.terminal;
         ctx.fill(z.path);
         ctx.save();
@@ -522,13 +570,7 @@ export class MapRenderer {
     ctx.fillStyle = C.shadow;
     for (const b of w.buildings) {
       if (!overlaps(b.box, view)) continue;
-      const sh = shadowOf(this.sun, Math.max(4, b.height));
-      if (sh.alpha < 0.03) continue;
-      ctx.save();
-      ctx.globalAlpha = sh.alpha;
-      ctx.translate(sh.dx, sh.dy);
-      ctx.fill(b.path);
-      ctx.restore();
+      fillBuildingShadow(ctx, b.polygon, shadowOf(this.sun, Math.max(4, b.height)));
     }
     for (const b of w.buildings) {
       if (!overlaps(b.box, view)) continue;
@@ -546,20 +588,28 @@ export class MapRenderer {
     }
     if (s > 0.35) {
       for (const u of w.roofUnits) {
-        ctx.fillStyle = 'rgba(0,0,0,0.18)';
-        ctx.fillRect(u.x + 0.8, u.y + 0.8, u.w, u.h);
+        const unitShadow = shadowOf(this.sun, 2.5);
+        ctx.fillStyle = `rgba(0,0,0,${0.18 * unitShadow.alpha})`;
+        ctx.fillRect(u.x + unitShadow.dx, u.y + unitShadow.dy, u.w, u.h);
         ctx.fillStyle = C.roofUnit;
         ctx.fillRect(u.x, u.y, u.w, u.h);
       }
     }
 
     // Cars on the car-park decks.
-    if (s > 0.6) for (const c of w.cars) if (inView(c, view)) drawCar(ctx, c);
+    if (s > 0.6) for (const c of w.cars) if (inView(c, view)) drawCar(ctx, c, sunShadow(this.sun));
 
     // Trees: shadows, then canopies in three greens, then highlights.
     if (s > 0.06) {
-      ctx.fillStyle = 'rgba(30,45,20,0.28)';
-      ctx.fill(w.trees.shadow);
+      const treeShadow = shadowOf(this.sun, 4);
+      if (treeShadow.alpha > 0.03) {
+        ctx.save();
+        ctx.globalAlpha = treeShadow.alpha;
+        ctx.translate(treeShadow.dx, treeShadow.dy);
+        ctx.fillStyle = 'rgba(30,45,20,0.28)';
+        ctx.fill(w.trees.shadow);
+        ctx.restore();
+      }
       ['#5f8a3e', '#6f9a45', '#4f7a36'].forEach((colour, i) => {
         ctx.fillStyle = colour;
         ctx.fill(w.trees.canopy[i]);
@@ -571,13 +621,42 @@ export class MapRenderer {
     }
 
     // Fire tenders and follow-me cars parked at their stations (static props).
-    if (s > 0.5) for (const v of w.vehicles) if (inView(v, view, 15)) drawVehicle(ctx, v, s);
+    if (s > 0.5) for (const v of w.vehicles) if (inView(v, view, 15)) drawVehicle(ctx, v, s, 0, sunShadow(this.sun));
     for (const sock of w.windsocks) drawWindsock(ctx, sock, px);
 
     // Labels in screen space.
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     drawLabels(ctx, camera, this.t3 === 'done' ? w.labels.map((l) => (l.zoneKind === 'construction' ? { ...l, text: 'Terminal 3', style: 'terminal' } : l)) : w.labels);
   }
+}
+
+// Shadow of a building: the roof outline moved away from the sun plus the walls swept between, so it
+// stays attached to the building however low the sun is. All pieces wound the same way, one fill.
+function fillBuildingShadow(ctx, polygon, sh) {
+  if (!polygon || sh.alpha < 0.03) return;
+  const wound = (pts) => {
+    let a = 0;
+    pts.forEach((p, i) => {
+      const q = pts[(i + 1) % pts.length];
+      a += p[0] * q[1] - q[0] * p[1];
+    });
+    return a < 0 ? [...pts].reverse() : pts;
+  };
+  const piece = (pts) => {
+    wound(pts).forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.closePath();
+  };
+  ctx.save();
+  ctx.globalAlpha = sh.alpha;
+  ctx.fillStyle = C.shadow;
+  ctx.beginPath();
+  piece(polygon.map(([x, y]) => [x + sh.dx, y + sh.dy]));
+  polygon.forEach((p, i) => {
+    const q = polygon[(i + 1) % polygon.length];
+    piece([p, q, [q[0] + sh.dx, q[1] + sh.dy], [p[0] + sh.dx, p[1] + sh.dy]]);
+  });
+  ctx.fill();
+  ctx.restore();
 }
 
 // --- World construction (once) -------------------------------------------------------------------
@@ -668,7 +747,7 @@ function buildWorld(map, stands, graph, hide = null) {
       runways.push({ path, width: r.width });
       const frame = frames.find((f) => f.ref === r.ref);
       features.unshift({
-        path, stroke: r.width, box: bbox(r.points), runway: r.ref === '07/25',
+        path, stroke: r.width, box: bbox(r.points), runway: r.ref,
         info: { title: `Runway ${r.ref}`, lines: [`${Math.round(frame?.length ?? 0)} m × ${r.width} m`, r.ref === '07/25' ? 'Main runway · ILS CAT I both ends' : 'Secondary runway · Code C · crosses the Adyar river'] },
       });
     }
@@ -714,12 +793,24 @@ function buildWorld(map, stands, graph, hide = null) {
   // Lights, trees, floodlights.
   const lightPts = edgeLights(map, frames);
   const lights = { runway: new Path2D(), taxi: new Path2D() };
-  for (const [x, y] of lightPts.runway) lights.runway.rect(x - 0.8, y - 0.8, 1.6, 1.6);
+  lights.byRunway = new Map(frames.map((f) => [f.ref, new Path2D()]));
+  for (const [x, y] of lightPts.runway) {
+    lights.runway.rect(x - 0.8, y - 0.8, 1.6, 1.6);
+    // Each edge light belongs to the runway whose centreline it is beside.
+    let best = null;
+    for (const f of frames) {
+      const [a, b] = Object.values(f.ends);
+      const d = Math.abs((x - a[0]) * (b[1] - a[1]) - (y - a[1]) * (b[0] - a[0])) / f.length;
+      const k = ((x - a[0]) * (b[0] - a[0]) + (y - a[1]) * (b[1] - a[1])) / (f.length * f.length);
+      if (k >= -0.02 && k <= 1.02 && (!best || d < best.d)) best = { d, f };
+    }
+    if (best) lights.byRunway.get(best.f.ref).rect(x - 0.8, y - 0.8, 1.6, 1.6);
+  }
   for (const [x, y] of lightPts.taxi) lights.taxi.rect(x - 0.6, y - 0.6, 1.2, 1.2);
   const treeList = trees(map, frames);
   const treePaths = { shadow: new Path2D(), canopy: [new Path2D(), new Path2D(), new Path2D()], highlight: new Path2D() };
   for (const t of treeList) {
-    circle(treePaths.shadow, t.x + t.r * 0.45, t.y + t.r * 0.45, t.r);
+    circle(treePaths.shadow, t.x, t.y, t.r);
     circle(treePaths.canopy[t.shade], t.x, t.y, t.r);
     circle(treePaths.highlight, t.x - t.r * 0.3, t.y - t.r * 0.3, t.r * 0.45);
   }

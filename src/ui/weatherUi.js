@@ -41,8 +41,11 @@ function effects(w) {
   const vis = w.visibility();
   if (vis < 1200) out.push(`Low-visibility procedures: spacing ×${w.sepScale.toFixed(1)}${w.projects.cat3.state === 'done' ? ' (CAT-III)' : ' (build CAT-III to reduce)'}`);
   if (w.rampClosed) out.push(`Lightning: outdoor ramp work stopped until ${hhmm(w.rampClosedUntil)}`);
-  const { head, cross } = w.windComponents();
-  if (cross > 15 || head < -5) out.push(`Runway ${w.active}: ${Math.round(head)} kt headwind, ${Math.round(cross)} kt crosswind`);
+  for (const R of w.runways) {
+    if (R.mode === 'off') continue;
+    const { head, cross } = w.windComponents(R.active);
+    if (cross > 15 || head < -5) out.push(`Runway ${R.active}: ${Math.round(head)} kt headwind, ${Math.round(cross)} kt crosswind`);
+  }
   if (w.lighting.dark && w.t < w.lighting.dark.until) out.push(`Lighting fault: part of the apron is dark until ${hhmm(w.lighting.dark.until)} (work there 25 % slower)`);
   if (w.lights.night && !w.lights.apron) out.push('Apron floodlights are off in the dark: ramp work 30 % slower');
   return out.length ? out : ['No weather restrictions'];

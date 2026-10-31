@@ -85,12 +85,30 @@ export function dayPhase(el, t) {
   return 'Night';
 }
 
-// Shadow cast by a thing `h` metres tall: offset in the world (x east, y south) and how dark it is.
-// The sun is in the direction `az`; the shadow falls the opposite way and is longer when the sun is low.
-export function shadowOf(sun, h = 10) {
-  if (sun.el <= 0) return { dx: 0, dy: 0, alpha: 0 };
-  const len = Math.min(h * 3.2, h / Math.tan(Math.max(sun.el, 3.5) * RAD));
+// How much of the sunlight reaches the ground directly (0..1), from the weather: thin cloud lets it
+// through, overcast, rain and fog scatter it, so shadows soften and disappear.
+export function directSun(w) {
+  if (!w) return 1;
+  const cloud = 1 - 0.95 * smooth(0.45, 0.95, w.cloud ?? 0);
+  const rain = 1 - smooth(0, 0.35, w.rain ?? 0);
+  const fog = smooth(600, 4000, w.vis ?? 10000);
+  return cloud * rain * fog;
+}
+
+// The one shadow rule everything uses. The point of an object h metres up falls (ux, uy) * h from the
+// point below it: away from the sun (azimuth az), longer the lower the sun. x east, y south. alpha:
+// how strong the shadow is (none at night, fading at sunrise and sunset and in dull weather).
+export function sunShadow(sun) {
+  if (sun.el <= 0) return { ux: 0, uy: 0, alpha: 0 };
+  // Capped at twice the height (sun about 27° up): lower still, the direction keeps turning but the
+  // shadow does not run away from what casts it, and it fades instead.
+  const perMetre = Math.min(2, 1 / Math.tan(Math.max(sun.el, 3.5) * RAD));
   const away = (sun.az + 180) * RAD;
-  const fade = smooth(0, 7, sun.el);
-  return { dx: Math.sin(away) * len, dy: -Math.cos(away) * len, alpha: fade };
+  return { ux: Math.sin(away) * perMetre, uy: -Math.cos(away) * perMetre, alpha: smooth(0, 14, sun.el) * (sun.clear ?? 1) };
+}
+
+// Shadow cast by the top of a thing `h` metres tall.
+export function shadowOf(sun, h = 10) {
+  const s = sunShadow(sun);
+  return { dx: s.ux * h, dy: s.uy * h, alpha: s.alpha };
 }

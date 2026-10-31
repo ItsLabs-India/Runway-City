@@ -16,6 +16,7 @@
     "check:brands": "node scripts/brand-check.mjs",
     "check:weather": "node scripts/weather-check.mjs",
     "check:flights": "node scripts/flight-check.mjs",
+    "check:runways": "node scripts/runway-check.mjs",
     "check:ground": "node scripts/ground-check.mjs",
     "check:finance": "node scripts/finance-check.mjs",
     "check:gridlock": "node scripts/gridlock-check.mjs",

@@ -59,7 +59,7 @@ export function telemetry(w, f) {
   let etaT = null;
   if (phase === 'final') {
     dist = Math.max(0, (f.slot - w.t) * f.vApp);
-    distLabel = `to touchdown on ${w.active}`;
+    distLabel = `to touchdown on ${w.runwayOf(f).active}`;
     etaT = f.slot;
   } else if (phase === 'goAround') {
     distLabel = 'going around: climbing out, then back round';

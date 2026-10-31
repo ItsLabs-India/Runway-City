@@ -1,5 +1,6 @@
 // Top-down drawings of the people on the apron and of the working jet bridges, in metres.
 import { ROLES } from '../sim/groundcrew.js';
+import { sweepSteps } from './sprites.js';
 
 const dot = (ctx, x, y, r) => {
   ctx.beginPath();
@@ -100,6 +101,44 @@ const rr = (ctx, x, y, w, h, r) => {
   ctx.roundRect(x, y, w, h, Math.min(r, w / 2, h / 2));
 };
 
+// Shadow of a jet bridge: tunnel and cab swept from their underside (3 m) to the roof (6 m), the
+// rotunda from the ground up, so it stays joined to the bridge. u = sunShadow(). Drawn on the opaque
+// shadow layer, with the current fillStyle.
+export function drawJetBridgeShadow(ctx, b, u) {
+  const [rx, ry] = b.rotunda;
+  const [cx, cy] = b.cab;
+  const bx = cx - Math.cos(b.heading) * 2.1;
+  const by = cy - Math.sin(b.heading) * 2.1;
+  const span = Math.hypot(u.ux, u.uy);
+  const steps = (h0, h1, draw) => {
+    const n = sweepSteps(ctx, span * (h1 - h0));
+    for (let k = 0; k <= n; k++) {
+      const h = h0 + ((h1 - h0) * k) / n;
+      ctx.save();
+      ctx.translate(u.ux * h, u.uy * h);
+      draw();
+      ctx.restore();
+    }
+  };
+  steps(3, 6, () => {
+    ctx.save();
+    ctx.translate(rx, ry);
+    ctx.rotate(Math.atan2(by - ry, bx - rx));
+    ctx.fillRect(0, -1.8, Math.hypot(bx - rx, by - ry), 3.6);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(b.heading);
+    ctx.fillRect(-2.2, -2.3, 4.2, 4.6);
+    ctx.restore();
+  });
+  steps(0, 6, () => {
+    ctx.beginPath();
+    ctx.arc(rx, ry, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
 // A jet bridge: rotunda, a telescoping tunnel in three sections, the drive wheels, and the cab with its
 // canopy facing the door. b = { rotunda, cab, heading, e, state } from World.jetBridgeSprites().
 export function drawJetBridge(ctx, b, scale, t) {
@@ -113,22 +152,6 @@ export function drawJetBridge(ctx, b, scale, t) {
   const len = Math.hypot(bx - rx, by - ry) || 1;
   const ang = Math.atan2(by - ry, bx - rx);
   const detail = scale > 1.2;
-
-  // Shadows.
-  ctx.save();
-  ctx.translate(1.8, 1.8);
-  ctx.fillStyle = 'rgba(20,25,20,0.22)';
-  ctx.save();
-  ctx.translate(rx, ry);
-  ctx.rotate(ang);
-  ctx.fillRect(0, -1.8, len, 3.6);
-  ctx.restore();
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(b.heading);
-  ctx.fillRect(-2.2, -2.3, 4.2, 4.6);
-  ctx.restore();
-  ctx.restore();
 
   // Tunnel: three sections that slide into each other (widest at the cab end).
   ctx.save();

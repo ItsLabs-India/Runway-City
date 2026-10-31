@@ -5,6 +5,11 @@
 import { airframe } from '../sim/airframe.js';
 import { brandOf, BRANDS } from '../sim/brands.js';
 
+export const SHADOW_STRENGTH = 0.26; // darkness of a full shadow in clear sun
+const VEHICLE_HEIGHT_M = 2.6;
+const DEFAULT_SHADOW = { ux: 0.55, uy: 0.55, alpha: 1 }; // for the fleet viewer: sun in the north-west
+let vehicleShadow = { x: 0, y: 0, alpha: 0 };
+
 const geometryCache = new Map();
 
 const poly = (path, pts) => {
@@ -263,7 +268,76 @@ export function aircraftLights(a, time, moving) {
   return out;
 }
 
-export function drawAircraft(ctx, a, scale, { alt = 0, selected = false, time = 0, moving = false, shadow = null } = {}) {
+// Shadow of an aircraft, every part from its own height, so it meets the aircraft at the wheels and
+// only the fin reaches far. u = sunShadow(): { ux, uy } per metre. Fills with the current fillStyle
+// (the renderer draws ground aircraft opaque into one shadow layer, so overlaps do not get darker).
+// opaque: the fill may overlap itself, so solid parts are swept from their lowest to highest point and
+// the shadow grows out of the aircraft like the shadow of a real volume.
+export function drawAircraftShadow(ctx, a, u, alt = 0, opaque = false) {
+  const g = aircraftGeometry(a.type);
+  const t = g.f.t;
+  const H = t.height;
+  const belly = 0.16 * H;
+  const part = (h, draw) => {
+    ctx.save();
+    ctx.translate(a.x + u.ux * (h + alt), a.y + u.uy * (h + alt));
+    ctx.rotate(a.heading);
+    draw();
+    ctx.restore();
+  };
+  const sweep = (h0, h1, draw) => {
+    const n = opaque ? sweepSteps(ctx, Math.hypot(u.ux, u.uy) * (h1 - h0)) : 0;
+    if (!n) part((h0 + h1) / 2, draw);
+    else for (let k = 0; k <= n; k++) part(h0 + ((h1 - h0) * k) / n, draw);
+  };
+  part(t.wing.highWing ? 0.42 * H : 0.3 * H, () => ctx.fill(g.wings));
+  sweep(belly, belly + 2 * g.r, () => ctx.fill(g.body));
+  part(t.fin.tTail ? 0.95 * H : 0.48 * H, () => ctx.fill(g.stabPath));
+  for (const e of g.engines) {
+    const mid = e.rear ? belly + g.r : 0.18 * H;
+    sweep(mid - e.r, mid + e.r, () => {
+      roundRect(ctx, e.x - e.len, e.y - e.r, e.len, e.r * 2, e.r * 0.6);
+      ctx.fill();
+    });
+  }
+  // The fin stands up from the body: its shadow runs from the root to the tip.
+  const c = Math.cos(a.heading);
+  const sn = Math.sin(a.heading);
+  const { le, te } = g.f.fin;
+  const at = (x, h) => [a.x + x * c + u.ux * (h + alt), a.y + x * sn + u.uy * (h + alt)];
+  const chord = le - te;
+  const root = belly + 2 * g.r;
+  ctx.beginPath();
+  ctx.moveTo(...at(le, root));
+  ctx.lineTo(...at(te, root));
+  ctx.lineTo(...at(te - 0.05 * chord, H));
+  ctx.lineTo(...at(te + 0.3 * chord, H));
+  ctx.closePath();
+  ctx.fill();
+  if (alt > 0) return;
+  // Landing gear: the legs join the shadow to the wheels on the ground.
+  const nose = a.gN ?? t.length * t.noseGear;
+  const main = nose - (a.wb ?? t.wheelbase);
+  const leg = (x, y, h, w) => {
+    const px = a.x + x * c - y * sn;
+    const py = a.y + x * sn + y * c;
+    const n = Math.hypot(u.ux, u.uy) || 1;
+    const nx = (-u.uy / n) * (w / 2);
+    const ny = (u.ux / n) * (w / 2);
+    ctx.beginPath();
+    ctx.moveTo(px + nx, py + ny);
+    ctx.lineTo(px - nx, py - ny);
+    ctx.lineTo(px - nx + u.ux * h, py - ny + u.uy * h);
+    ctx.lineTo(px + nx + u.ux * h, py + ny + u.uy * h);
+    ctx.closePath();
+    ctx.fill();
+  };
+  const gearW = Math.max(0.35, g.r * 0.28);
+  leg(nose, 0, belly, gearW);
+  for (const side of [-1, 1]) leg(main, side * (g.r + 0.4), belly, gearW);
+}
+
+export function drawAircraft(ctx, a, scale, { alt = 0, selected = false, time = 0, moving = false, shadow = DEFAULT_SHADOW } = {}) {
   const g = aircraftGeometry(a.type);
   const lv = liveryOf(a);
   const hair = 1 / scale;
@@ -272,23 +346,18 @@ export function drawAircraft(ctx, a, scale, { alt = 0, selected = false, time = 
     ctx.save();
   ctx.translate(a.x, a.y);
 
-  // Ground shadow, offset with altitude towards the south-east (sun in the north-west).
-  // With a `shadow` ({ dx, dy, alpha } from the sun) it falls away from the sun and fades at night.
-  const sh = shadow ?? { dx: 1.4, dy: 1.4, alpha: 1 };
-  const dirLen = Math.hypot(sh.dx, sh.dy) || 1;
-  ctx.save();
-  ctx.translate(sh.dx + (sh.dx / dirLen) * alt * 0.35, sh.dy + (sh.dy / dirLen) * alt * 0.35);
-  ctx.rotate(a.heading);
-  ctx.fillStyle = sh.alpha <= 0.02 ? 'rgba(0,0,0,0)' : alt > 0 ? `rgba(0,0,0,${0.14 * sh.alpha})` : `rgba(20,25,20,${0.24 * sh.alpha})`;
-  ctx.fill(g.wings);
-  ctx.fill(g.stabPath);
-  ctx.fill(g.body);
-  ctx.fill(g.fin);
-  for (const e of g.engines) {
-    roundRect(ctx, e.x - e.len, e.y - e.r, e.len, e.r * 2, e.r * 0.6);
-    ctx.fill();
+  // Its own shadow, unless the renderer already put it in the shadow layer (shadow: null). High up the
+  // shadow is far away and blurred by the size of the sun, so it fades out.
+  if (shadow && shadow.alpha > 0.02) {
+    const fade = alt > 0 ? 0.6 * Math.max(0, 1 - alt / 900) : 1;
+    if (fade > 0.02) {
+      ctx.save();
+      ctx.translate(-a.x, -a.y);
+      ctx.fillStyle = `rgba(20,25,20,${SHADOW_STRENGTH * shadow.alpha * fade})`;
+      drawAircraftShadow(ctx, a, shadow, alt);
+      ctx.restore();
+    }
   }
-  ctx.restore();
 
   ctx.rotate(a.heading);
   const lift = 1 + Math.min(alt, 600) / 2400;
@@ -907,23 +976,28 @@ const VEHICLES = {
 };
 
 // simT: the game clock, for moving belts, bags and beacons.
-export function drawVehicle(ctx, v, scale, simT = 0) {
+// u = sunShadow(): the shadow of a vehicle falls the same way as everything else, whatever way it faces.
+export function drawVehicle(ctx, v, scale, simT = 0, u = null) {
   const draw = VEHICLES[v.kind];
   if (!draw) return;
   ctx.save();
   ctx.translate(v.x, v.y);
   ctx.rotate(v.heading);
+  vehicleShadow = localShadow(u, v.heading, VEHICLE_HEIGHT_M);
   draw(ctx, v, scale > 2.5, scale, simT);
   ctx.restore();
 }
 
 // Cars on car-park decks: simple shaded body with windscreen.
-export function drawCar(ctx, c) {
+export function drawCar(ctx, c, u = null) {
   ctx.save();
   ctx.translate(c.x, c.y);
   ctx.rotate(c.heading);
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
-  ctx.fillRect(-2.15, -0.85, 4.5, 1.85);
+  const sh = localShadow(u, c.heading, 1.4);
+  if (sh.alpha > 0.02) {
+    ctx.fillStyle = `rgba(20,25,20,${SHADOW_STRENGTH * sh.alpha})`;
+    sweptBox(ctx, 4.5, 1.8, sh);
+  }
   ctx.fillStyle = CAR_COLOURS[c.color];
   roundRect(ctx, -2.25, -0.9, 4.5, 1.8, 0.5);
   ctx.fill();
@@ -967,9 +1041,33 @@ function cab(ctx, frontX, len, width, colour, detail) {
   }
 }
 
+// A world shadow offset turned into the frame of something facing `heading`.
+function localShadow(u, heading, h) {
+  if (!u || u.alpha <= 0) return { x: 0, y: 0, alpha: 0 };
+  const c = Math.cos(heading);
+  const s = Math.sin(heading);
+  return { x: (u.ux * c + u.uy * s) * h, y: (-u.ux * s + u.uy * c) * h, alpha: u.alpha };
+}
+
+// How many steps sweep a shape across `metres` so the edge looks smooth: one every 1.5 pixels on screen.
+export function sweepSteps(ctx, metres) {
+  const m = ctx.getTransform();
+  return Math.max(1, Math.min(60, Math.ceil((metres * Math.hypot(m.a, m.b)) / 1.5)));
+}
+
+// The box from the ground up to its top: all in one path, so one even shadow joined to the vehicle.
+function sweptBox(ctx, l, w, sh) {
+  const n = sweepSteps(ctx, Math.hypot(sh.x, sh.y));
+  ctx.beginPath();
+  for (let k = 0; k <= n; k++) ctx.rect(-l / 2 + (sh.x * k) / n, -w / 2 + (sh.y * k) / n, l, w);
+  ctx.fill();
+}
+
 function shadowBox(ctx, l, w) {
-  ctx.fillStyle = 'rgba(20,25,20,0.22)';
-  ctx.fillRect(-l / 2 + 0.45, -w / 2 + 0.45, l, w);
+  const sh = vehicleShadow;
+  if (sh.alpha <= 0.02) return;
+  ctx.fillStyle = `rgba(20,25,20,${SHADOW_STRENGTH * sh.alpha})`;
+  sweptBox(ctx, l, w, sh);
 }
 
 function wheels(ctx, detail, positions, length, width) {

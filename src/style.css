@@ -1,5 +1,6 @@
 :root {
   --panel: rgba(18, 24, 33, 0.88);
+  --panel-solid: #141a23;
   --line: rgba(255, 255, 255, 0.12);
   --text: #eef2f6;
   --muted: #a8b3c0;
@@ -122,8 +123,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .log { list-style: none; margin: 0; padding: 0; }
 .log li { padding: 6px 0 6px 10px; border-left: 3px solid var(--muted); border-bottom: 1px solid var(--line); }
-.log li.warn { border-left-color: var(--warn); }
-.log li.critical { border-left-color: var(--bad); }
+.log li.lv-warn { border-left-color: var(--warn); }
+.log li.lv-critical { border-left-color: var(--bad); }
 .log time { color: var(--muted); margin-right: 6px; font-variant-numeric: tabular-nums; }
 .log button { height: 22px; margin-left: 6px; font-size: 11px; }
 
@@ -488,13 +489,13 @@ h2.fh { display: flex; align-items: center; gap: 8px; }
 .group[aria-label="Game speed"] button { min-width: 0; padding: 0 6px; }
 
 /* ---- UI/UX pass: panel title bar, section links, clickable stats, help ------------------------------- */
-.ph { position: sticky; top: -12px; z-index: 2; display: flex; align-items: center; gap: 8px; margin: -12px -14px 8px; padding: 10px 14px 8px; background: var(--panel); border-bottom: 1px solid var(--line); backdrop-filter: blur(6px); }
+.ph { position: sticky; top: -12px; z-index: 2; display: flex; align-items: center; gap: 8px; margin: -12px -14px 8px; padding: 10px 14px 8px; background: var(--panel-solid); border-bottom: 1px solid var(--line); backdrop-filter: blur(6px); }
 .ph h2 { margin: 0; font-size: 15px; letter-spacing: 0.01em; }
 .ph kbd { margin-left: 2px; }
 .ph .x { margin-left: auto; position: static; border: 0; background: none; color: var(--muted); font-size: 18px; min-width: 28px; }
 .ph .x:hover { color: var(--text); }
 kbd { display: inline-block; min-width: 18px; padding: 1px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; font: 600 11px/1.3 system-ui, sans-serif; color: var(--muted); text-align: center; }
-.jump { position: sticky; top: 30px; z-index: 1; display: flex; gap: 4px; overflow-x: auto; margin: 0 -14px 6px; padding: 4px 14px 6px; background: var(--panel); scrollbar-width: none; }
+.jump { position: sticky; top: 30px; z-index: 1; display: flex; gap: 4px; overflow-x: auto; margin: 0 -14px 6px; padding: 4px 14px 6px; background: var(--panel-solid); scrollbar-width: none; }
 .jump::-webkit-scrollbar { display: none; }
 .jump button { flex: none; height: 24px; min-height: 0; padding: 0 9px; border-radius: 999px; font-size: 11px; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); color: var(--muted); cursor: pointer; }
 .jump button:hover { color: var(--text); border-color: var(--accent); }
@@ -550,10 +551,409 @@ button:focus-visible, [data-row]:focus-visible { outline: 2px solid var(--accent
 .txs b.bad { color: var(--bad); }
 @media (max-width: 760px) {
   .fcards { grid-template-columns: repeat(2, 1fr); }
-  .ph { top: 0; }
+  /* The map is busy behind a phone panel, and its header is taller (larger touch targets). */
+  .panel, .ph, .jump { background: var(--panel-solid); }
+  .jump { top: var(--ph-phone, 44px); }
 }
 
 /* Cargo and general-aviation tags on the flight board */
 .fids .svc { font-size: 10px; font-weight: 600; padding: 0 4px; border-radius: 3px; margin-left: 4px; vertical-align: 1px; }
 .fids .svc.cargo { background: #8a5a12; color: #fff3dc; }
 .fids .svc.ga { background: #2d5f73; color: #e3f4fb; }
+
+/* ---- runway control ------------------------------------------------------------------------------------ */
+.rwplans { margin-bottom: 4px; }
+.rwcard { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, 0.04); }
+.rwcard.off { opacity: 0.82; border-style: dashed; }
+.rwcard.closed { border-color: var(--bad); }
+.rwhead { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.rwhead b { font-size: 15px; letter-spacing: 0.02em; }
+.rwhead small { color: var(--muted); }
+.rwdir { margin: 0 0 0 auto; }
+.rwmodes { margin: 0 0 6px; }
+.rwmodes button { font-size: 12px; padding: 0 7px; }
+.rwstate { margin: 2px 0 6px; font-size: 13px; }
+.rwstate .ok { color: var(--ok); }
+.rwstate .warn { color: var(--warn); }
+.rwstate .bad { color: var(--bad); }
+.rwcard .fine { margin: 4px 0; font-size: 11px; }
+.rwcard .row-actions { margin-top: 4px; }
+
+/* =================================================================================================
+   DESIGN SYSTEM (2026-10-31). The last layer in this file: new work uses these tokens and components.
+
+   Hierarchy, in order of how loud things are allowed to be:
+     1. Accent yellow: only "what is happening now / what to do next": the running speed, the open tab,
+        the primary action of a screen, the current timeline step. Never for headings or plain text.
+     2. Red / orange / green: only a state worth noticing (bad, attention, good). Fine = no colour.
+     3. White: selected options and values. 4. Grey tiers: labels, then notes.
+
+   Surfaces go up by lightness: --s0 chrome, --s1 panel, --s2 card, --s3 control.
+   Text: --t1 values and titles, --t2 reading text, --t3 labels and notes (all at least 4.5:1 on --s2).
+   Type: 11 label, 12 small, 13 body, 16 panel title, 20 hero value, 26 screen title.
+   Space: 4, 8, 12, 16, 24. Corners: 6 controls, 10 cards, 14 panels and sheets.
+   Components: button (default, .primary, .danger, quiet steppers), .seg (one choice of a few), .tile (a
+   figure with its label), h3 / .fd-sec h4 (section label), .trow (setting with a toggle), .tag.
+   ================================================================================================= */
+:root {
+  --s0: rgba(12, 16, 22, 0.94);
+  --s1: #121821;
+  --s2: #1a222d;
+  --s3: #27313e;
+  --s3h: #333f4e;
+  --line: rgba(255, 255, 255, 0.09);
+  --line2: rgba(255, 255, 255, 0.18);
+  --t1: #f2f5f8;
+  --t2: #bcc6d1;
+  --t3: #8f9cab;
+  --text: var(--t1);
+  --muted: var(--t2);
+  --panel: var(--s1);
+  --panel-solid: var(--s1);
+  --accent: #f5c542;
+  --on-accent: #17191d;
+  --ok: #4cd98a;
+  --warn: #ffb35c;
+  --bad: #ff7468;
+  --ok-soft: rgba(76, 217, 138, 0.15);
+  --warn-soft: rgba(255, 179, 92, 0.16);
+  --bad-soft: rgba(255, 116, 104, 0.16);
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.38);
+}
+
+#hud { font-size: 13px; line-height: 1.4; -webkit-font-smoothing: antialiased; }
+
+/* ---- buttons ------------------------------------------------------------------------------------ */
+#hud button, #hud .btn {
+  height: 30px;
+  min-width: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--s3);
+  color: var(--t1);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+}
+#hud button:hover:not(:disabled), #hud .btn:hover { background: var(--s3h); }
+#hud button:active:not(:disabled) { transform: translateY(1px); }
+#hud button:disabled { opacity: 0.45; cursor: not-allowed; }
+#hud button:focus-visible, #hud .btn:focus-within, #hud tr:focus-visible, #hud summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; box-shadow: none; }
+
+#hud button.primary { background: var(--accent); color: var(--on-accent); font-weight: 650; }
+#hud button.primary:hover:not(:disabled) { background: #ffd35e; }
+#hud button.danger { background: transparent; border-color: rgba(255, 116, 104, 0.5); color: var(--bad); }
+#hud button.danger:hover:not(:disabled) { background: var(--bad-soft); }
+
+/* Selected option: white, so it stands out without using the accent. */
+#hud button.on, #hud .seg button.on, #hud .proc-a button.on, #hud .row-actions button.on { background: var(--t1); color: var(--s1); border-color: transparent; font-weight: 600; }
+#hud button.on:hover:not(:disabled) { background: #fff; }
+
+/* Small +/− steppers: quiet, they repeat many times on one panel. */
+#hud .buy button, #hud .proc-a button[data-action='add'], #hud .proc-a button[data-action='retail'] { height: 26px; min-width: 32px; padding: 0 6px; background: transparent; border-color: var(--line2); color: var(--t2); font-variant-numeric: tabular-nums; }
+#hud .buy button:hover, #hud .proc-a button[data-action='add']:hover, #hud .proc-a button[data-action='retail']:hover { background: var(--s3); color: var(--t1); }
+.fleet .buy button { margin-left: 3px; }
+
+/* Things that are buttons but must not look like one. */
+#hud button.x { background: none; height: 28px; min-width: 28px; padding: 0; color: var(--t3); font-size: 18px; line-height: 1; }
+#hud button.x:hover { background: var(--s3); color: var(--t1); }
+.info .x, .sheet .x { position: absolute; top: 10px; right: 10px; z-index: 3; }
+
+/* ---- one choice of a few ---------------------------------------------------------------------------- */
+.seg { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0; padding: 2px; border-radius: 8px; background: var(--s2); }
+#hud .seg button { height: 26px; padding: 0 10px; background: transparent; color: var(--t2); }
+#hud .seg button:hover:not(:disabled):not(.on) { background: var(--s3); color: var(--t1); }
+#hud .seg button.on { background: var(--t1); color: var(--s1); }
+.seg .lbl { padding: 0 6px; color: var(--t3); font-size: 11px; }
+.panel > .seg, .panel .seg.sub, .term-tabs { margin: 0 0 8px 0; }
+.ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: 0 0 8px; }
+.ctl > .lbl { color: var(--t3); font-size: 12px; }
+
+/* ---- section labels ------------------------------------------------------------------------------ */
+.panel h3, .sheet h3, .fd-sec h4 { margin: 22px 0 8px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.08em; color: var(--t3); }
+.panel h3 small, .sheet h3 small { color: var(--t3); font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.panel .ph + h3, .panel .jump + h3 { margin-top: 10px; }
+.sub-h { color: var(--t3); }
+.fd-sec { margin: 0; padding: 12px 0; border-top: 1px solid var(--line); }
+.fd-sec h4 { margin: 0 0 8px; }
+.muted, .info p { color: var(--t2); }
+.fine { color: var(--t3) !important; font-size: 11.5px; }
+
+/* Collapsible sections: details in a card and in the day report. */
+details > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::after { content: '›'; color: var(--t3); font-size: 16px; line-height: 1; transition: transform 0.12s; }
+details[open] > summary::after { transform: rotate(90deg); }
+details > summary:hover h4, details > summary:hover { color: var(--t1); }
+details.fd-sec > summary h4 { margin: 0; }
+details.fd-sec[open] > summary { margin-bottom: 8px; }
+.rsec { border-top: 1px solid var(--line); padding: 10px 0; }
+.rsec > summary { color: var(--t2); font-size: 13px; font-weight: 600; }
+.rsec[open] > summary { margin-bottom: 10px; color: var(--t1); }
+.rsec h3 { margin-top: 14px; }
+
+/* ---- a figure with its label ---------------------------------------------------------------------- */
+.kpis { gap: 10px 14px; color: var(--t3); font-size: 11.5px; }
+.kpis > span { display: flex; flex-direction: column; min-width: 0; }
+.kpis b { color: var(--t1); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.tile, .fcard { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--s2); }
+.tile small, .fcard small { color: var(--t3); font-size: 11px; text-transform: none; letter-spacing: 0; }
+.tile b { color: var(--t1); font-size: 20px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fcard b { color: var(--t1); font-size: 16px; font-weight: 700; }
+.tile span, .fcard span { color: var(--t3); font-size: 11px; }
+.tile.ok b, .fcard.pos b { color: var(--ok); }
+.tile.mid b { color: var(--warn); }
+.tile.bad b, .fcard.neg b { color: var(--bad); }
+.tag { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--s3); color: var(--t2); font-size: 11px; font-style: normal; font-weight: 600; }
+.tag.now { background: var(--accent); color: var(--on-accent); }
+.tag.ok { background: var(--ok-soft); color: var(--ok); }
+
+/* ---- top bar: time on the left, the state of the airport in the middle, panels on the right ---------- */
+.bar { top: 8px; left: 8px; right: 8px; flex-wrap: nowrap; gap: 14px; padding: 6px 8px 6px 14px; border-radius: 12px; background: var(--s0); box-shadow: var(--shadow); backdrop-filter: blur(10px); }
+.brand { flex: none; font-size: 13px; font-weight: 700; color: var(--t1); white-space: nowrap; }
+.brand span { color: var(--t3); font-weight: 600; margin-left: 4px; }
+.clock { display: flex; flex-direction: column; flex: none; min-width: 0; line-height: 1.1; }
+.clock b { color: var(--t1); font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.clock small { color: var(--t3); font-size: 10.5px; white-space: nowrap; }
+.group[aria-label='Game speed'] { flex: none; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(255, 255, 255, 0.05); }
+#hud .group[aria-label='Game speed'] button { height: 28px; min-width: 32px; padding: 0 5px; background: transparent; color: var(--t2); font-variant-numeric: tabular-nums; }
+#hud .group[aria-label='Game speed'] button:hover:not(.active) { background: var(--s3); color: var(--t1); }
+#hud .group[aria-label='Game speed'] button.active { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+
+.stats { flex: 1 1 auto; flex-wrap: nowrap; align-items: stretch; gap: 2px; min-width: 0; padding-left: 12px; border-left: 1px solid var(--line); color: var(--t2); overflow: hidden; }
+#hud .stats .stat, .stats .wind { display: flex; flex-direction: column; justify-content: center; flex: none; height: 38px; min-width: 0; padding: 0 8px; border: 0; border-radius: 6px; background: none; line-height: 1.15; text-align: left; font-weight: 400; }
+#hud .stats .stat:hover { background: rgba(255, 255, 255, 0.08); }
+.stats small { color: var(--t3); font-size: 10.5px; font-weight: 500; }
+.stats b { color: var(--t1); font-size: 13.5px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stats .mid b { color: var(--warn); }
+.stats .bad b { color: var(--bad); }
+#hud .stats .chip-btn { align-self: center; flex: none; height: 28px; margin-left: 4px; padding: 0 9px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.07); font-size: 12px; }
+#hud .stats .chip-btn:hover { background: var(--s3h); }
+
+.tabs { flex: none; margin-left: auto; gap: 1px; }
+#hud .tabs button { position: relative; height: 34px; min-width: 0; padding: 0 10px; background: transparent; color: var(--t2); }
+#hud .tabs button:hover { background: rgba(255, 255, 255, 0.08); color: var(--t1); }
+#hud .tabs button.active { background: rgba(255, 255, 255, 0.08); color: var(--t1); font-weight: 600; }
+#hud .tabs button.active::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: 2px; height: 2px; border-radius: 1px; background: var(--accent); }
+.tabs b { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: 999px; background: var(--bad); color: #1b0d0b; font-size: 10.5px; font-weight: 700; line-height: 16px; text-align: center; }
+.tabs b:empty { display: none; }
+
+/* Map controls float on the map, away from the game's own controls. */
+.mapctl { position: absolute; right: 12px; bottom: 44px; display: flex; flex-direction: column; overflow: hidden; border-radius: 10px; background: var(--s0); box-shadow: var(--shadow); transition: right 0.15s; }
+#hud .mapctl button { width: 36px; height: 36px; padding: 0; border-radius: 0; background: transparent; color: var(--t1); font-size: 16px; }
+#hud .mapctl button:hover { background: var(--s3); }
+#hud .mapctl button + button { border-top: 1px solid var(--line); }
+.panel:not([hidden]) ~ .mapctl { right: 488px; }
+
+/* ---- panels and cards float above the map and stay readable over it -------------------------------- */
+.panel { top: 70px; right: 8px; bottom: 32px; width: min(468px, calc(100% - 16px)); padding: 12px 16px 16px; border-radius: 14px; background: var(--s1); box-shadow: var(--shadow); scrollbar-width: thin; scrollbar-color: var(--s3) transparent; }
+.ph { top: -12px; margin: -12px -16px 10px; padding: 12px 10px 10px 16px; background: var(--s1); border-bottom: 1px solid var(--line); backdrop-filter: none; }
+.ph h2 { font-size: 16px; font-weight: 700; }
+.ph kbd { color: var(--t3); }
+#hud .ph .x { margin-left: auto; position: static; }
+.jump { top: 39px; margin: -10px -16px 10px; padding: 8px 16px; background: var(--s1); border-bottom: 1px solid var(--line); }
+#hud .jump button { height: 24px; padding: 0 9px; border-radius: 999px; background: transparent; color: var(--t3); font-size: 11.5px; }
+#hud .jump button:hover { background: var(--s3); color: var(--t1); }
+.panel h3[id], .panel section[id] { scroll-margin-top: 92px; }
+
+.info { top: 70px; left: 8px; bottom: auto; width: min(372px, calc(100% - 16px)); max-height: calc(100% - 102px); padding: 14px 16px 0; border-radius: 14px; background: var(--s1); box-shadow: var(--shadow); scrollbar-width: thin; scrollbar-color: var(--s3) transparent; }
+.info h2 { margin: 0 28px 4px 0; font-size: 18px; font-weight: 700; }
+.info .sub { margin: 0 0 2px; color: var(--t2); }
+.info .sub b { color: var(--t1); font-weight: 600; }
+.routeline { display: flex; align-items: center; gap: 6px; margin: 8px 0 10px; font-size: 15px; font-weight: 700; letter-spacing: 0.03em; color: var(--t1); }
+.routeline i { color: var(--t3); font-style: normal; font-weight: 400; }
+.info > .row-actions { position: sticky; bottom: 0; z-index: 2; margin: 0 -16px; padding: 10px 16px 12px; background: var(--s1); border-top: 1px solid var(--line); }
+.info > :not(.row-actions):last-child { padding-bottom: 14px; }
+.fd-status { margin-bottom: 2px; }
+.pill { padding: 3px 10px; background: var(--s3); }
+.pill.atStand { background: var(--ok-soft); color: var(--ok); }
+.pill.holding, .pill.goAround, .pill.late { background: var(--warn-soft); }
+.pill.cancelled, .pill.diverted { background: var(--bad-soft); }
+.leg { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.leg:last-of-type { border-bottom: 0; }
+.leg .rarrow { color: var(--t3); }
+.tline li.now { color: var(--t1); }
+.tasks i { background: linear-gradient(90deg, var(--ok) var(--p), rgba(255, 255, 255, 0.1) var(--p)); }
+.tasks li.done { color: var(--t2); }
+.info .warn { color: var(--warn); }
+.spark polyline, .inst .needle { stroke: var(--accent); }
+
+/* ---- flight board ------------------------------------------------------------------------------------- */
+.fids { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.fids th { padding: 4px 6px 6px; color: var(--t3); font-size: 11px; font-weight: 500; }
+.fids td { padding: 6px; border-bottom: 1px solid var(--line); color: var(--t2); }
+.fids td.fl { color: var(--t1); }
+.fids td.fl b { font-weight: 650; }
+.fids tr[data-row]:hover td { background: rgba(255, 255, 255, 0.05); }
+.fids td:first-child { color: var(--t1); }
+.fids i { color: var(--warn); font-size: 11.5px; }
+.fids .st { color: var(--t3); }
+.fids tr.final .st, .fids tr.landing .st, .fids tr.taxiIn .st, .fids tr.inbound .st, .fids tr.pushback .st, .fids tr.taxiOut .st, .fids tr.takeoff .st, .fids tr.lineUp .st { color: var(--t1); }
+.fids tr.departed td { color: var(--t3); }
+.fids tr.grp td { color: var(--t3); border-bottom-color: var(--line2); }
+.fleet { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.fleet td { padding: 6px 4px; color: var(--t2); }
+.fleet td:first-child { color: var(--t1); }
+.fleet tr.short td:first-child, .fleet tr.short td:nth-child(3) { color: var(--bad); }
+
+/* ---- terminals ------------------------------------------------------------------------------------------ */
+.term-h { margin: 8px 0 4px; }
+.term-h > b { font-size: 15px; }
+.term-h .muted { font-size: 12px; }
+.wait { padding: 2px 8px; background: var(--s3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.wait.ok { background: var(--ok-soft); }
+.wait.mid { background: var(--warn-soft); }
+.wait.bad { background: var(--bad-soft); }
+.proc { margin: 8px 0; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--s2); }
+.proc-h b { font-size: 13.5px; }
+.proc-h small { color: var(--t3); }
+.proc-b { color: var(--t3); font-size: 12px; margin: 3px 0 6px; }
+.chart { max-width: none; height: 30px; }
+.chart rect.fit { fill: rgba(76, 217, 138, 0.45); }
+.chart rect.over { fill: var(--bad); }
+.chart line { stroke: var(--t3); }
+.proc-a { margin-top: 8px; }
+.proc-a .lbl { width: 64px; color: var(--t3); }
+#hud .proc-a button { height: 26px; }
+.plan { margin: 0 0 8px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; background: rgba(245, 197, 66, 0.06); }
+.plan h3 { margin-top: 0; }
+
+/* ---- settings with a toggle --------------------------------------------------------------------------- */
+.trow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.trow:last-child { border-bottom: 0; }
+.trow > span { display: flex; flex-direction: column; min-width: 0; }
+.trow b { color: var(--t1); font-weight: 600; }
+.trow small { color: var(--t3); font-size: 11.5px; }
+#hud .trow button { flex: none; width: 52px; padding: 0; }
+
+/* ---- projects ------------------------------------------------------------------------------------------ */
+.card-p { padding: 12px 14px; border-radius: 10px; background: var(--s2); }
+.card-p > b { font-size: 14px; }
+.card-p p { color: var(--t3); font-size: 12px; }
+.card-p .eff { color: var(--t1); font-size: 12.5px; }
+.card-p.done { border-color: var(--line); }
+.card-p.building { border-color: rgba(245, 197, 66, 0.55); }
+.card-p .row-actions { align-items: center; margin-top: 8px; }
+.bar-p { background: linear-gradient(90deg, var(--accent) var(--p), rgba(255, 255, 255, 0.1) var(--p)); }
+
+/* ---- alerts ------------------------------------------------------------------------------------------- */
+.log li { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: start; gap: 2px 8px; padding: 8px 0 8px 10px; border-left: 2px solid var(--line2); color: var(--t2); }
+.log li.lv-warn { color: var(--t1); }
+.log li.lv-critical { color: var(--t1); background: var(--bad-soft); }
+.log time { margin: 0; color: var(--t3); font-size: 12px; }
+#hud .log button { height: 24px; padding: 0 8px; font-size: 11.5px; }
+.empty { margin: 24px 0; text-align: center; color: var(--t3); }
+
+/* ---- messages ---------------------------------------------------------------------------------------- */
+.toasts { top: 70px; left: 50%; width: min(420px, calc(100% - 16px)); transform: translateX(-50%); align-items: center; }
+.toast { padding: 8px 14px; border: 0; border-radius: 10px; background: var(--s0); box-shadow: var(--shadow); color: var(--t1); backdrop-filter: blur(10px); }
+.toast.ok { box-shadow: inset 3px 0 0 var(--ok), var(--shadow); }
+.toast.bad { box-shadow: inset 3px 0 0 var(--bad), var(--shadow); }
+.banner { top: 70px; display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 14px; background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow); }
+#hud .banner button { background: rgba(0, 0, 0, 0.14); color: var(--on-accent); }
+.help { right: 60px; bottom: 34px; padding: 6px 12px; border-radius: 8px; background: var(--s0); color: var(--t2); pointer-events: none !important; animation: hint-out 0.6s 14s forwards; }
+.panel:not([hidden]) ~ .help, .modal:not([hidden]) ~ .help { display: none; }
+@keyframes hint-out { to { opacity: 0; visibility: hidden; } }
+.credits { color: var(--t2); background: var(--s0); }
+
+/* ---- menu and day report -------------------------------------------------------------------------------- */
+.modal { background: rgba(8, 11, 16, 0.66); backdrop-filter: blur(3px); }
+.sheet { width: min(920px, 100%); padding: 28px 30px; border-radius: 14px; background: var(--s1); box-shadow: var(--shadow); scrollbar-width: thin; scrollbar-color: var(--s3) transparent; }
+.sheet:focus { outline: none; }
+.sheet h1 { margin: 0 0 4px; font-size: 26px; font-weight: 750; letter-spacing: -0.01em; }
+.sheet h1 span { color: var(--t3); font-weight: 600; }
+.sheet .lead { margin: 0 0 18px; color: var(--t2); font-size: 14px; max-width: 62ch; }
+.sheet h3:first-of-type { margin-top: 20px; }
+
+#hud button.card { display: flex; flex-direction: column; align-items: flex-start; height: auto; gap: 4px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--s2); text-align: left; white-space: normal; }
+#hud button.card:hover { border-color: var(--line2); background: var(--s3); }
+.card strong { display: flex; align-items: center; gap: 8px; color: var(--t1); font-size: 14px; font-weight: 650; }
+.card span { color: var(--t2); }
+.card em { margin-top: auto; padding-top: 4px; color: var(--t3); font-size: 11.5px; }
+#hud button.card.current { border-color: var(--line2); background: var(--s2); }
+#hud button.card.feature { padding: 16px; }
+.card.feature strong { font-size: 16px; }
+.cards.feature { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.cards.more { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.cards.more .card span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.ctl .proc-a { margin: 0; }
+#hud button.card.continue { flex-direction: row; align-items: center; justify-content: space-between; margin: 0 0 8px; padding: 14px 16px; border-color: transparent; background: var(--accent); }
+#hud button.card.continue:hover { background: #ffd35e; }
+.card.continue strong { color: var(--on-accent); font-size: 16px; }
+.card.continue span { color: rgba(23, 25, 29, 0.78); font-weight: 500; }
+.menu-foot { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px 28px; }
+.menu-foot .row-actions { margin-top: 0; }
+.keys { margin: 16px 0 0; color: var(--t3); font-size: 12px; }
+#hud .keys button { height: 24px; margin-left: 6px; padding: 0 8px; background: transparent; border-color: var(--line2); color: var(--t2); font-size: 11.5px; }
+.linkbtn { color: var(--t2); }
+
+.verdict { margin: 0 0 14px; font-size: 15px; color: var(--t2); }
+.verdict b { font-weight: 700; }
+.verdict b.ok { color: var(--ok); }
+.verdict b.mid { color: var(--warn); }
+.verdict b.bad { color: var(--bad); }
+.tiles + .kpis { margin-top: 14px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.sheet .sticky-foot { position: sticky; bottom: -28px; z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; margin: 12px -30px -28px; padding: 12px 30px; background: var(--s1); border-top: 1px solid var(--line); }
+
+/* ---- narrower windows: keep one clean row as long as possible ---------------------------------------- */
+@media (max-width: 1400px) { .stats .wind { display: none; } .brand span { display: none; } }
+@media (max-width: 1260px) { .brand { display: none; } #hud .tabs button { padding: 0 7px; } }
+@media (max-width: 1120px) { .bar { flex-wrap: wrap; } .stats { order: 5; flex-basis: 100%; padding-left: 0; border-left: 0; } .panel, .info, .toasts, .banner { top: 116px; } .info { max-height: calc(100% - 148px); } }
+
+/* ---- phones: the top is status, the thumb zone is navigation ------------------------------------------ */
+@media (max-width: 760px) {
+  .bar { top: 6px; left: 6px; right: 6px; gap: 6px 10px; padding: 6px 8px; flex-wrap: wrap; backdrop-filter: none; background: var(--s1); }
+  .fids th:nth-child(4), .fids td:nth-child(4) { display: none; }
+  .fids .st { max-width: 96px; }
+  .clock { order: 1; margin: 0; }
+  .clock b { font-size: 16px; }
+  .stats { order: 2; flex: 1 1 0; flex-basis: 0; padding: 0; justify-content: flex-end; }
+  .stats > :nth-child(n + 3) { display: none !important; }
+  #hud .stats .stat { height: 36px; min-width: 56px; }
+  .group[aria-label='Game speed'] { order: 3; width: 100%; }
+  #hud .group[aria-label='Game speed'] button { flex: 1; min-height: 36px; }
+
+  .tabs { position: fixed; left: 0; right: 0; bottom: 30px; order: 9; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); width: auto; margin: 0; padding: 2px 4px; background: var(--s1); border-top: 1px solid var(--line); overflow: visible; }
+  #hud .tabs button { height: 44px; min-width: 0; padding: 0; font-size: 11px; }
+  .tabs b { position: absolute; top: 3px; right: 3px; }
+  .credits { height: 30px; padding: 2px 8px; font-size: 9.5px; line-height: 1.3; overflow: hidden; background: var(--s1); }
+
+  .panel { top: auto; left: 6px; right: 6px; bottom: 84px; width: auto; height: 54%; padding-left: 12px; padding-right: 12px; }
+  .ph { margin-left: -12px; margin-right: -12px; padding-left: 12px; }
+  .jump { margin-left: -12px; margin-right: -12px; padding-left: 12px; padding-right: 12px; }
+  .info { top: auto; left: 6px; right: 6px; bottom: 84px; width: auto; max-height: 54%; }
+  .toasts, .banner { top: 108px; bottom: auto; }
+  .mapctl { right: 6px; bottom: 88px; }
+  #hud .mapctl button { width: 40px; height: 40px; }
+  .panel:not([hidden]) ~ .mapctl, .info:not([hidden]) ~ .mapctl { display: none; }
+
+  #hud button, #hud .btn { min-height: 38px; min-width: 38px; }
+  #hud .seg button { height: 34px; }
+  .seg { flex-wrap: wrap; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tiles + .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sheet { padding: 18px 14px; }
+  .sheet .sticky-foot { bottom: -18px; margin: 12px -14px -18px; padding: 10px 14px; }
+  .sheet h1 { font-size: 22px; }
+}
+
+/* ---- refinements after the screenshot review ---------------------------------------------------------- */
+.fids th, .fids td { padding-left: 4px; padding-right: 4px; }
+.fids .st { max-width: 104px; }
+.cards.more { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.lightrow .lbl small, .panel small.note { color: var(--t3); }
+@media (max-width: 760px) {
+  .fids { font-size: 12px; }
+  .fids i { display: none; }
+  .fids td:nth-child(3) { max-width: 78px; overflow: hidden; text-overflow: ellipsis; }
+  .fids .st { max-width: 84px; }
+  .cards.more { grid-template-columns: 1fr; }
+  .cards.more .card span { -webkit-line-clamp: unset; }
+}
+
+@media (max-width: 760px) {
+  #hud button.x { min-width: 44px; min-height: 44px; }
+}
