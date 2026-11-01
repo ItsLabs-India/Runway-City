@@ -5,7 +5,7 @@ import { World, DEFAULT_TRAFFIC_BOOST, TRAFFIC_LEVELS } from './sim/world.js';
 import { standBlocker } from './sim/stands.js';
 import { AIRCRAFT_TYPES } from './sim/aircraftTypes.js';
 import { SCENARIOS } from './sim/scenarios.js';
-import { serviceTime, simDay, gameStart } from './sim/timing.js';
+import { serviceTime, simDay, gameStart, SPEEDS, DEFAULT_SPEED } from './sim/timing.js';
 import { fmtCr } from './sim/terminal.js';
 import { createHud } from './ui/hud.js';
 import { createLineIndex, gearDeviation } from './sim/lineCheck.js';
@@ -25,9 +25,7 @@ const VIEWS = {
   stands: { x: -700, y: 1180, scale: 3 },
   gate: { x: -722, y: 1135, scale: 8 },
 };
-// 1× is the normal speed: one second on the game clock per real second. See sim/timing.js.
-const SPEEDS = new Set([0, 1, 3, 10, 30, 60]);
-const DEFAULT_SPEED = 1;
+const SPEED_VALUES = SPEEDS.map((s) => s.value);
 const MAX_FRAME_S = 1; // a slow frame still advances the clock in full; a long pause (hidden tab) does not catch up
 const DAILY = ['normal', 'festival', 'bhogi', 'cyclone', 'outage'];
 const AUTOSAVE_MS = 20_000;
@@ -53,7 +51,7 @@ let world = null;
 let renderer = null;
 let selection = null; // { type: 'flight' | 'stand' | 'runway' | 'info', id?, info? }
 let standPick = null; // { flightId, valid: Map(standId -> reason | null) }
-let speed = params.has('speed') && SPEEDS.has(Number(params.get('speed'))) ? Number(params.get('speed')) : DEFAULT_SPEED;
+let speed = params.has('speed') && [0, ...SPEED_VALUES].includes(Number(params.get('speed'))) ? Number(params.get('speed')) : DEFAULT_SPEED;
 let speedBeforeModal = DEFAULT_SPEED;
 let lastRunSpeed = speed || DEFAULT_SPEED; // what Space resumes
 let weatherTimer = null;
@@ -105,11 +103,11 @@ function weatherPref() {
   }
 }
 
-// Traffic option for a normal day: +50 % flights by default, or none / +100 %. Remembered between visits.
+// Traffic option for a normal day: the real flights by default, or +50 %. Remembered between visits.
 function trafficPref() {
   try {
-    const v = Number(localStorage.getItem('rc-traffic'));
-    return localStorage.getItem('rc-traffic') !== null && TRAFFIC_LEVELS.includes(v) ? v : DEFAULT_TRAFFIC_BOOST;
+    const v = Number(localStorage.getItem('rc-traffic-level'));
+    return localStorage.getItem('rc-traffic-level') !== null && TRAFFIC_LEVELS.includes(v) ? v : DEFAULT_TRAFFIC_BOOST;
   } catch {
     return DEFAULT_TRAFFIC_BOOST;
   }
@@ -373,12 +371,12 @@ function act(action, arg) {
       break;
     case 'traffic':
       try {
-        localStorage.setItem('rc-traffic', String(Number(arg)));
+        localStorage.setItem('rc-traffic-level', String(Number(arg)));
       } catch {
         // private mode: the choice just is not remembered
       }
       openMenu(menuCanClose);
-      hud.toast(`Traffic on a normal day: ${Number(arg) ? `+${Math.round(Number(arg) * 100)} %` : 'standard'}. Applies to the next normal day you start.`);
+      hud.toast(`Traffic on a normal day: ${Number(arg) ? `+${Math.round(Number(arg) * 100)} %` : 'the real flights'}. Applies to the next normal day you start.`);
       break;
     case 'lighting': {
       const [kind, value] = arg.split(':');
@@ -590,7 +588,7 @@ window.addEventListener('keydown', (e) => {
     }
     refresh();
   } else if (/^[1-5]$/.test(k)) {
-    speed = [1, 3, 10, 30, 60][Number(k) - 1];
+    speed = SPEED_VALUES[Number(k) - 1];
     lastRunSpeed = speed;
     refresh();
   } else if (TAB_KEYS[k]) hud.openTab(hud.tab === TAB_KEYS[k] ? null : TAB_KEYS[k]);
@@ -659,7 +657,7 @@ function frame(now) {
     if (camera.following && !world.visibleFlights().includes(camera.following)) camera.following = null;
     camera.update(dt);
     ui.ghosts = traffic.status === 'live' ? traffic.ghosts() : [];
-    renderer.draw(camera, world, { selected: selection, standPick, ghosts: ui.ghosts });
+    renderer.draw(camera, world, { selected: selection, standPick, ghosts: ui.ghosts, running: speed > 0 && !modal });
     sound.update(dt, camera, world, { ghosts: ui.ghosts, speed, paused: modal });
     uiTimer += dt;
     if (uiTimer > 0.25) {

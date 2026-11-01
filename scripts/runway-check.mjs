@@ -13,7 +13,7 @@ const ok = (name, pass, detail = '') => {
   if (!pass) failed++;
 };
 const make = (plan, extra = {}) => {
-  const w = new World(map, { scenarioId: 'normal', startTime: start, weatherMode: 'calm', trafficBoost: 0.5, ...extra });
+  const w = new World(map, { scenarioId: 'normal', startTime: start, weatherMode: 'calm', ...extra });
   w.setRunwayPlan(plan);
   return w;
 };
@@ -118,4 +118,43 @@ Object.assign(old, { active: '25', closures: [], arrSlots: [], runwayUser: null,
 const g = make('dualLand');
 g.restore(old);
 ok('a save from before the second runway keeps it out of use', g.second.mode === 'off' && g.main.active === '25');
+
+// ---- the taxiway queue on a new game's default plan: one busy day --------------------------------------------
+const q = new World(map, { scenarioId: 'normal', startTime: start, weatherMode: 'calm' });
+ok('a new game uses both runways for landing and take-off', q.runwayPlan === 'dualMixed' && q.main.mode === 'both' && q.second.mode === 'both');
+const rolls = {};
+const seenRoll = new Set();
+let shortRoll = 0;
+let stoppedMin = 0;
+let longQueueMin = 0;
+for (let i = 0; i < 24 * 3600; i++) {
+  q.update(1);
+  let queued = 0;
+  for (const f of q.flights) {
+    if ((f.phase === 'taxiOut' || f.phase === 'holdShort') && f.speed < 0.5) queued++;
+    if (f.phase !== 'takeoff' || seenRoll.has(f.id)) continue;
+    seenRoll.add(f.id);
+    // A take-off roll starts at least the wake spacing after the last aircraft got airborne.
+    const R = q.runwayOf(f);
+    if (R.lastDeparture.t > 0 && R.lastDeparture.t !== rolls[R.ref] && q.t - R.lastDeparture.t < (R.lastDeparture.wake === 'H' ? 120 : 60) - 1.5) shortRoll++;
+    rolls[R.ref] = R.lastDeparture.t;
+  }
+  stoppedMin += queued / 60;
+  if (queued >= 4) longQueueMin += 1 / 60;
+}
+ok('take-off rolls keep wake spacing', shortRoll === 0, `${shortRoll} too close, ${seenRoll.size} take-offs`);
+ok('departures spend little time stopped on the taxiways', stoppedMin < 650 && longQueueMin < 20, `${Math.round(stoppedMin)} aircraft-minutes a day, ${Math.round(longQueueMin)} min with 4 or more waiting`);
+
+// A landing booked for the moment a closed runway reopens lands instead of going around.
+const cl = new World(map, { scenarioId: 'normal', startTime: start, weatherMode: 'calm' });
+cl.setRunwayPlan('single');
+cl.update(2 * 3600);
+while (cl.flights.filter((f) => f.phase === 'inbound').length < 2) cl.update(60); // wait for some landings to be booked
+cl.closeRunway(10, 'Test closure', '07/25');
+const closedTo = cl.main.closures.at(-1).to;
+const ga0 = cl.kpi.goArounds;
+const settled = cl.flights.filter((f) => f.phase === 'inbound' && f.slot >= closedTo);
+cl.update(16 * 60);
+const reopened = settled.filter((f) => f.phase === 'goAround' || f.phase === 'holding').length;
+ok('landings booked after a closure do not go around because of it', settled.length > 0 && reopened === 0, `${settled.length} booked, ${cl.kpi.goArounds - ga0} go-arounds in all`);
 process.exit(failed ? 1 : 0);

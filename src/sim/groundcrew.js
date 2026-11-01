@@ -26,9 +26,8 @@ const tri = (x) => {
   return k < 0.5 ? k * 2 : 2 - k * 2;
 };
 
-export function crewSprites(w) {
+export function crewSprites(w, t = w.t) {
   const out = [];
-  const t = w.t;
   const add = (p) => out.push(p);
   for (const f of w.flights) {
     if (!['atStand', 'pushback', 'turning', 'taxiIn'].includes(f.phase)) continue;

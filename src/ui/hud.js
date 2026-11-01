@@ -9,13 +9,13 @@ import { SCENARIOS } from '../sim/scenarios.js';
 import { PERKS, PROCESSES, fmtCr } from '../sim/terminal.js';
 import { panel, selectionPanel, hhmm, esc } from './panels.js';
 import { setSectionOpen } from './flightDetails.js';
-import { simDay } from '../sim/timing.js';
+import { morph } from './morph.js';
+import { simDay, SPEEDS } from '../sim/timing.js';
 
 const clockText = (t) => `Day ${simDay(t) + 1} · ${hhmm(t)} IST`;
-const SPEEDS = [0, 1, 3, 10, 30, 60];
 // [id, button label, key, panel title]
 const TABS = [['board', 'Flights', 'F', 'Flights'], ['term', 'Terminals', 'T', 'Terminals'], ['proj', 'Projects', 'P', 'Projects'], ['ops', 'Ops', 'O', 'Operations'], ['fin', 'Finance', 'I', 'Finance and management'], ['log', 'Alerts', 'L', 'Alerts']];
-const KEYS = [['Space', 'Pause / resume'], ['1 – 5', 'Speed: 1× normal (real time), 3×, 10×, 30×, 60×'], ['F', 'Flights board and airlines'], ['T', 'Terminals: queues, staff, building'], ['P', 'Projects'], ['O', 'Operations: weather, lights, runway, vehicles, crews'], ['I', 'Finance and management'], ['L', 'Alerts'], ['M', 'Sound on / off'], ['H or ?', 'This help'], ['+ / −, wheel, pinch', 'Zoom'], ['Arrow keys, drag', 'Move the map'], ['Esc', 'Close the card, the panel or a dialog']];
+const KEYS = [['Space', 'Pause / resume'], ['1 – 5', 'Speed: Normal (2×, 1 game minute = 30 seconds), 4×, 10×, 20×, 60×'], ['F', 'Flights board and airlines'], ['T', 'Terminals: queues, staff, building'], ['P', 'Projects'], ['O', 'Operations: weather, lights, runway, vehicles, crews'], ['I', 'Finance and management'], ['L', 'Alerts'], ['M', 'Sound on / off'], ['H or ?', 'This help'], ['+ / −, wheel, pinch', 'Zoom'], ['Arrow keys, drag', 'Move the map'], ['Esc', 'Close the card, the panel or a dialog']];
 
 // Panel title bar, and a row of jump links for long panels (one per section heading).
 function decorate(tab, html) {
@@ -41,7 +41,7 @@ export function createHud(root, cb) {
     <header class="bar" role="toolbar" aria-label="Game controls">
       <div class="brand">Runway City <span>MAA</span></div>
       <div class="clock" data-clock aria-live="off">--:--</div>
-      <div class="group" role="group" aria-label="Game speed">${SPEEDS.map((s) => `<button data-speed="${s}" aria-label="${s ? `${s} times speed` : 'Pause'}" title="${s ? `${s === 1 ? 'Normal speed: one clock second per real second' : `${s}× real time`} (key ${SPEEDS.indexOf(s)})` : 'Pause (Space)'}">${s === 0 ? '❚❚' : `${s}×`}</button>`).join('')}</div>
+      <div class="group" role="group" aria-label="Game speed"><button data-speed="0" aria-label="Pause" title="Pause (Space)">❚❚</button>${SPEEDS.map((s, i) => `<button data-speed="${s.value}" aria-label="${s.label} speed" title="${s.title} (key ${i + 1})">${s.label}</button>`).join('')}</div>
       <div class="stats" data-stats></div>
       <div class="group tabs" role="group" aria-label="Panels">
         ${TABS.map(([id, label, key, title]) => `<button data-tab="${id}" title="${title} (${key})">${label}${id === 'log' ? ' <b data-alerts></b>' : ''}</button>`).join('')}
@@ -170,7 +170,7 @@ export function createHud(root, cb) {
             <div>
               <h3>Options</h3>
               <div class="ctl"><span class="lbl">Weather</span><span class="seg" role="group" aria-label="Weather">${opt('weatherMode', 'random', 'Random', weatherMode, 'The season decides rain, fog and storms')}${opt('weatherMode', 'calm', 'Calm', weatherMode, 'Clear skies only')}</span></div>
-              <div class="ctl"><span class="lbl">Traffic on a normal day</span><span class="seg" role="group" aria-label="Traffic on a normal day">${opt('traffic', 0, 'Standard', traffic, 'The standard schedule. Applies to the next normal day you start.')}${opt('traffic', 0.5, '+50 %', traffic, '50 % more flights than standard. Applies to the next normal day you start.')}</span></div>
+              <div class="ctl"><span class="lbl">Traffic on a normal day</span><span class="seg" role="group" aria-label="Traffic on a normal day">${opt('traffic', 0, 'Real', traffic, 'The real number of flights. Applies to the next normal day you start.')}${opt('traffic', 0.5, '+50 %', traffic, '50 % more flights than standard. Applies to the next normal day you start.')}</span></div>
             </div>
             <div>
               <h3>Saved games</h3>
@@ -201,7 +201,7 @@ export function createHud(root, cb) {
             <li>Click the money, on-time, satisfaction or runway figures in the top bar to jump to where you manage them.</li>
             <li>Click any aircraft, stand, terminal or the runway for its card; the flight card shows live data and the whole turnaround.</li>
             <li>Long panels have section links at the top. Finance shows where every rupee comes from and goes.</li>
-            <li>Every day starts at 06:00. At 1× the clock runs in real time and ground services take 30 % of their real time (a 10-minute job takes 3 minutes); 3× to 60× skip quiet hours.</li>
+            <li>Every day starts at 06:00. Normal is 2× real time: one game minute takes 30 seconds, a full day 12 hours. Use 4× to 60× to move faster (a day takes 24 minutes at 60×), and pause whenever you need to think.</li>
             <li>Weather can be set to calm in the menu or the Operations panel if storms make a busy day too hard.</li>
           </ul>
         </div>`;
@@ -256,20 +256,20 @@ export function createHud(root, cb) {
     },
 
     update(world, selection, speed, ui) {
-      $('[data-clock]').innerHTML = `<b>${hhmm(world.t)}${speed > 1 ? '' : `:${String(Math.floor(world.t % 60)).padStart(2, '0')}`}</b><small>Day ${simDay(world.t) + 1} · IST</small>`; // minutes are enough at 3x and faster
+      morph($('[data-clock]'), `<b>${hhmm(world.t)}${speed > 4 ? '' : `:${String(Math.floor(world.t % 60)).padStart(2, '0')}`}</b><small>Day ${simDay(world.t) + 1} · IST</small>`); // seconds up to 4×: any faster, they would be a blur
       const k = world.kpi;
       const otp = k.departures ? Math.round((k.onTime / k.departures) * 100) : 100;
       const inUse = world.runways.filter((R) => R.mode !== 'off');
       const closed = inUse.some((R) => world.runwayClosed(world.t, R.ref));
       const sat = Math.round(world.satisfaction());
       // A figure only takes a colour when it needs the player's attention.
-      $('[data-stats]').innerHTML = `
+      morph($('[data-stats]'), `
         <button class="stat money ${world.money < 0 ? 'bad' : ''}" data-action="openTab" data-arg="fin" title="Cash. Open Finance (I)"><small>Cash</small><b>${formatINR(world.money)}</b></button>
         <button class="stat ${otp < 60 ? 'bad' : otp < 80 ? 'mid' : ''}" data-action="openTab" data-arg="board" title="On-time departures (within 15 min). Open the flight board (F)"><small>On time</small><b>${otp}%</b></button>
         <button class="stat ${sat < 50 ? 'bad' : sat < 70 ? 'mid' : ''}" data-action="openTab" data-arg="term" title="Passenger satisfaction: flights and queues. Open Terminals (T)"><small>Satisfaction</small><b>${sat}</b></button>
         <button class="stat ${closed ? 'bad' : ''}" data-jump='{"runway":true}' title="Runways in use. Show the runway control"><small>RWY</small><b>${inUse.map((R) => R.active).join(' · ')}${closed ? ' closed' : ''}</b></button>
         <span class="wind" title="Wind${world.liveWeather ? ' (real)' : ''}${world.wind.gust ? `, gusting ${world.wind.gust} kt` : ''}"><small>Wind</small><b>${String(world.wind.from).padStart(3, '0')}° ${world.wind.kt}${world.wind.gust ? `G${world.wind.gust}` : ''} kt</b></span>
-        ${weatherChip(world)}`;
+        ${weatherChip(world)}`);
       const fresh = world.log.length - seenAlerts;
       $('[data-alerts]').textContent = fresh > 0 && tab !== 'log' ? fresh : '';
       if (tab === 'log') seenAlerts = world.log.length;
@@ -278,7 +278,7 @@ export function createHud(root, cb) {
         const html = decorate(tab, panel(tab, world, ui));
         if (html !== lastPanel) {
           const top = pEl.scrollTop;
-          pEl.innerHTML = html;
+          morph(pEl, html);
           pEl.scrollTop = top;
           lastPanel = html;
         }
@@ -289,7 +289,7 @@ export function createHud(root, cb) {
       if (html !== lastInfo) {
         const keep = info.scrollTop;
         const wasSame = lastInfoKey === selectionKey(selection);
-        info.innerHTML = html;
+        morph(info, html);
         info.scrollTop = wasSame ? keep : 0; // keep your place while the same card refreshes
         lastInfo = html;
         lastInfoKey = selectionKey(selection);

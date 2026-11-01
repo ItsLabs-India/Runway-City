@@ -54,7 +54,7 @@ const rms = () =>
 const wait = (ms) => page.waitForTimeout(ms);
 
 // ---- calm day, aircraft and vehicles ------------------------------------------------------------------
-await boot('scenario=normal&time=07:00&warm=900&speed=1');
+await boot('scenario=normal&time=07:00&warm=900&speed=2');
 check('sound switches on after the first tap', await page.evaluate(() => window.__runway.ui.sound === true));
 check('speaker button shows the state', (await page.textContent('[data-sound]')) === '🔊');
 

@@ -51,8 +51,10 @@ for (const [key, text] of [['f', 'Arrivals'], ['t', 'Upgrade every terminal'], [
 }
 await page.keyboard.press('Escape');
 check('Esc closes the panel', await W(() => document.querySelector('[data-panel]').hidden));
-await page.keyboard.press('3');
-check('key 3 sets 10x speed', (await W(() => window.__runway.hud && document.querySelector('[data-speed="10"]').classList.contains('active'))) === true);
+for (const [key, value, name] of [['1', 2, 'Normal'], ['2', 4, '4×'], ['3', 10, '10×'], ['4', 20, '20×'], ['5', 60, '60×']]) {
+  await page.keyboard.press(key);
+  check(`key ${key} sets ${name} speed`, await W((v) => document.querySelector(`[data-speed="${v}"]`).classList.contains('active'), value));
+}
 await page.keyboard.press('Space');
 check('Space pauses', await W(() => document.querySelector('[data-speed="0"]').classList.contains('active')));
 
@@ -169,7 +171,13 @@ check('the flight actions stay in view while the card scrolls', await W(() => {
   card.scrollTop = 0;
   return r.bottom <= c.bottom + 1 && r.top >= c.top;
 }));
-check('panels fit their width (nothing clipped sideways)', await W(() => { const p = document.querySelector('[data-panel]'); return p.scrollWidth <= p.clientWidth + 1; }));
+const panelFit = await W(() => {
+  const p = document.querySelector('[data-panel]');
+  const edge = p.getBoundingClientRect().right;
+  const wide = [...p.querySelectorAll('*')].filter((e) => e.getBoundingClientRect().right > edge + 1).slice(0, 3).map((e) => `${e.tagName}.${e.className}: ${e.textContent.trim().slice(0, 50)}`);
+  return { ok: p.scrollWidth <= p.clientWidth + 1, detail: `${p.scrollWidth} in ${p.clientWidth} · ${p.querySelector('h2')?.textContent} · ${wide.join(' | ')}` };
+});
+check('panels fit their width (nothing clipped sideways)', panelFit.ok, panelFit.detail);
 check('the top bar stays on one row at desktop width', await W(() => document.querySelector('.bar').getBoundingClientRect().height < 60));
 const mBefore = await W(() => window.__runway.world.money);
 await click('[data-action="prioritise"]');
@@ -456,10 +464,10 @@ await context.setOffline(false);
 await page.goto(`${URL}/?scenario=normal`);
 await page.waitForFunction(() => window.__runway?.world);
 await settle();
-const opening = await W(() => ({ t: window.__runway.world.t, normal: document.querySelector('[data-speed="1"]').classList.contains('active'), clock: document.querySelector('[data-clock] b').innerText }));
+const opening = await W(() => ({ t: window.__runway.world.t, normal: document.querySelector('[data-speed="2"]').classList.contains('active'), clock: document.querySelector('[data-clock] b').innerText }));
 check('a new game starts at 06:00, whatever the real time', opening.t >= 21600 && opening.t < 21660 && /^06:00:\d\d$/.test(opening.clock), JSON.stringify(opening));
-check('a new game runs at 1×', opening.normal);
-for (const s of [1, 3, 10, 30, 60]) {
+check('a new game runs at Normal speed', opening.normal);
+for (const s of [2, 4, 10, 20, 60]) {
   const rate = await W(async (x) => {
     const r = window.__runway;
     r.setSpeed(x);

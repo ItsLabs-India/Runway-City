@@ -3,7 +3,7 @@
 import { GSE, CREW, PHASE_LABEL, formatINR } from '../sim/world.js';
 import { AIRCRAFT_TYPES } from '../sim/aircraftTypes.js';
 import { cityName } from '../sim/airlines.js';
-import { PROJECTS } from '../sim/projects.js';
+import { PROJECTS, projectHours } from '../sim/projects.js';
 import { brandOf, registration } from '../sim/brands.js';
 import { badge } from '../logos.js';
 import { weatherPanel } from './weatherUi.js';
@@ -183,7 +183,7 @@ function projectsPanel(w) {
     const needs = p.needs.filter((n) => w.projects[n].state !== 'done');
     const pct = st.state === 'building' ? Math.min(100, ((w.t - st.startedAt) / (st.finishAt - st.startedAt)) * 100) : st.state === 'done' ? 100 : 0;
     const action = st.state === 'idle'
-      ? `<button data-action="project" data-arg="${id}" ${needs.length ? 'disabled' : ''}>Start · ${fmtCr(p.cost)} · ${p.hours} h</button>${needs.length ? `<span class="muted fine">Needs ${esc(PROJECTS[needs[0]].name)} first</span>` : w.money < p.cost ? '<span class="muted fine">Not enough cash yet</span>' : ''}`
+      ? `<button data-action="project" data-arg="${id}" ${needs.length ? 'disabled' : ''}>Start · ${fmtCr(p.cost)} · ${projectHours(p)} h</button>${needs.length ? `<span class="muted fine">Needs ${esc(PROJECTS[needs[0]].name)} first</span>` : w.money < p.cost ? '<span class="muted fine">Not enough cash yet</span>' : ''}`
       : st.state === 'building' ? `<span>Ready at ${hhmm(st.finishAt)} (${Math.round(pct)} %)</span>` : '<i class="tag ok">Complete</i>';
     return `<div class="card-p ${st.state}"><b>${esc(p.name)}</b><p>${esc(p.story)}</p><p class="eff">${esc(p.effect)}</p>${st.state === 'building' ? `<i class="bar-p" style="--p:${pct}%"></i>` : ''}<div class="row-actions">${action}</div></div>`;
   }).join('');

@@ -383,7 +383,7 @@ export class Terminals {
   // ---- boarding gate -------------------------------------------------------------------------
 
   // May boarding start? Needs 92 % of passengers through security (and emigration), or the gate
-  // closure time (18 min of work before STD: 5.4 on the clock) after which the rest are offloaded.
+  // closure time (18 min before STD) after which the rest are offloaded.
   boardingReady(f) {
     const p = f.pax;
     if (!p) return { ok: true, board: f.paxOut };
@@ -436,7 +436,7 @@ export class Terminals {
       if (!n) return { ok: false, why: 'Nothing to add' };
       if (s.pods + s.podsBuilding + n > T.retail.cap) return { ok: false, why: `${T.name} has room for only ${T.retail.cap} retail pods` };
       s.podsBuilding += n;
-      return { ok: true, cost: n * RETAIL.podCost, minutes: 20 + 5 * n };
+      return { ok: true, cost: n * RETAIL.podCost, minutes: serviceTime(20 + 5 * n) };
     }
     const def = PROCESSES[op.proc];
     const P = T.proc[op.proc];
@@ -447,7 +447,7 @@ export class Terminals {
       if (!n) return { ok: false, why: 'Nothing to add' };
       if (s.positions + s.adds + n > P.cap) return { ok: false, why: `${T.name} can take at most ${P.cap} ${def.unit}s (${s.positions + s.adds} planned)` };
       s.adds += n;
-      return { ok: true, cost: n * def.addCost, minutes: 25 + 7 * n };
+      return { ok: true, cost: n * def.addCost, minutes: serviceTime(25 + 7 * n) };
     }
     if (op.kind === 'tier') {
       const to = op.to ?? s.tier + 1;
@@ -457,7 +457,7 @@ export class Terminals {
       for (let k = s.tier + 1; k <= to; k++) cost += (s.positions + s.adds) * def.upCost[k];
       s.tier = to;
       s.tierPending = true;
-      return { ok: true, cost, minutes: 60 + 6 * s.positions };
+      return { ok: true, cost, minutes: serviceTime(60 + 6 * s.positions) };
     }
     if (op.kind === 'sell') {
       const n = Math.max(0, op.n | 0);

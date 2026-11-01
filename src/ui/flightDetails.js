@@ -76,10 +76,33 @@ function turnaround(w, f) {
   const rows = f.tasks.map((task) => {
     const pct = task.state === 'done' ? 100 : task.state === 'work' ? Math.max(0, Math.min(100, Math.round((1 - (task.end - w.t) / task.dur) * 100))) : 0;
     const icon = { done: '✔', work: '●', driving: '→', wait: '○' }[task.state];
-    const times = task.doneAt ? `${task.start ? hhmm(task.start) : ''}–${hhmm(task.doneAt)}` : task.start && task.state !== 'wait' ? `from ${hhmm(task.start)}` : '';
+    const left = task.state === 'work' ? ` · ${Math.max(1, Math.ceil((task.end - w.t) / 60))} min left` : '';
+    const times = task.doneAt ? `${task.start ? hhmm(task.start) : ''}–${hhmm(task.doneAt)}` : task.start && task.state !== 'wait' ? `from ${hhmm(task.start)}${left}` : '';
     return `<li class="${task.state}"><span>${icon} ${esc(task.label)}${times ? ` <small>${times}</small>` : ''}</span><i style="--p:${pct}%"></i></li>`;
   }).join('');
-  return `<ul class="tasks">${rows}</ul>`;
+  const ready = readyAt(w, f);
+  return `${ready !== null ? `<p class="fd-ready">Ready to push back about <b>${hhmm(ready)}</b></p>` : ''}<ul class="tasks">${rows}</ul>`;
+}
+
+// When the doors should close: the remaining jobs in order, each after the jobs it depends on. Boarding and the
+// outbound load wait for their time before departure, as they do in the simulation.
+function readyAt(w, f) {
+  const finish = new Map();
+  const byId = new Map(f.tasks.map((t) => [t.id, t]));
+  for (const task of f.tasks) {
+    if (task.state === 'done') {
+      finish.set(task.id, w.t);
+      continue;
+    }
+    if (task.state === 'work') {
+      finish.set(task.id, task.end);
+      continue;
+    }
+    const after = Math.max(w.t, ...task.after.filter((a) => byId.has(a)).map((a) => finish.get(a) ?? w.t));
+    const notBefore = task.board ? f.std - (task.dur + serviceTime(8 * 60)) : task.lead ? f.std - (task.dur + task.lead) : -Infinity;
+    finish.set(task.id, Math.max(after, notBefore) + task.dur);
+  }
+  return byId.get('close')?.state === 'done' ? null : finish.get('close') ?? null;
 }
 
 // Jet bridges, ramp team and bags for the stand section.

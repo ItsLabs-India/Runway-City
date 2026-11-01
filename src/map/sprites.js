@@ -975,7 +975,7 @@ const VEHICLES = {
   },
 };
 
-// simT: the game clock, for moving belts, bags and beacons.
+// simT: the display clock (real time while running), for moving belts, bags and beacons.
 // u = sunShadow(): the shadow of a vehicle falls the same way as everything else, whatever way it faces.
 export function drawVehicle(ctx, v, scale, simT = 0, u = null) {
   const draw = VEHICLES[v.kind];

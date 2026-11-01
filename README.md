@@ -47,13 +47,13 @@ npm run import:timetable -- schedule.csv   # real timetable → public/data/time
 
 Deploy (free Cloudflare account): `npm run build && npx wrangler deploy`. This serves the game and the `/api` proxy together.
 
-Useful URLs: `?scenario=cyclone`, `?time=09:20`, `?speed=30` (speeds 1, 3, 10, 30, 60), `?warm=1800`, `?panel=term`, `?view=stands`.
+Useful URLs: `?scenario=cyclone`, `?time=09:20`, `?speed=2` (speeds 0, 2, 4, 10, 20, 60), `?warm=1800`, `?panel=term`, `?view=stands`.
 
 | Control | Action |
 |---|---|
 | Drag / arrow keys / one finger | Move around |
 | Wheel / pinch / + − | Zoom |
-| Space, 1–5 | Pause / resume; 1× (normal: real time), 3×, 10×, 30×, 60× |
+| Space, 1–5 | Pause / resume; Normal (2×, 1 game minute = 30 seconds), 4×, 10×, 20×, 60× |
 | F T P O I L | Flights, Terminals, Projects, Operations, Finance, Alerts |
 | H or ? | Keys and tips |
 | F T P O L | Flights, Terminals, Projects, Operations, Alerts |

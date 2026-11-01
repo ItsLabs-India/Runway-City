@@ -101,6 +101,12 @@ export class MapRenderer {
 
   // sim: the World; ui: { selected: {type,id}, standPick: {valid: Map(standId -> reason|null)} }
   draw(camera, sim, ui = {}) {
+    // The clock people, belts and clouds move by: real time whatever the game speed, stopped when paused.
+    // The game clock is far too fast for them at speed. Display only: the simulation never reads it.
+    const real = performance.now() / 1000;
+    if (ui.running !== false) this.animT = (this.animT ?? 0) + Math.min(0.1, real - (this.lastDraw ?? real));
+    this.lastDraw = real;
+    const animT = this.animT ?? 0;
     this.t3 = sim.projects.t3.state;
     const locked = this.standsAll.filter((s) => s.locked).length;
     if (locked !== this.lockedCount) {
@@ -120,7 +126,7 @@ export class MapRenderer {
     const view = camera.view(60);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(this.layer, 0, 0);
-    this.atmos.ground(ctx, camera, sim, this.dpr); // cloud shadows, wet ground, fog
+    this.atmos.ground(ctx, camera, sim, this.dpr, animT); // cloud shadows, wet ground, fog
     camera.applyTo(ctx, this.dpr);
     const shadow = sunShadow(this.sun);
     const vehicles = s > 0.3 ? sim.vehicleSprites() : [];
@@ -142,7 +148,7 @@ export class MapRenderer {
     if (s > 0.5) {
       for (const v of vehicles) {
         if ((v.kind === 'cone' && s < 1.2) || !inView(v, view, 15)) continue;
-        drawVehicle(ctx, v, s, sim.t, shadow);
+        drawVehicle(ctx, v, s, animT, shadow);
       }
     }
     for (const f of ground) {
@@ -150,9 +156,9 @@ export class MapRenderer {
       drawAircraft(ctx, f, s, { selected: f === selectedFlight, moving: f.phase !== 'atStand', time, shadow: null });
     }
     if (s > 0.6) {
-      for (const p of sim.staffSprites()) if (inView(p, view, 10)) drawPerson(ctx, p, s, sim.t);
+      for (const p of sim.staffSprites(animT)) if (inView(p, view, 10)) drawPerson(ctx, p, s, animT);
     }
-    this.#drawJetBridges(ctx, sim, s, view);
+    this.#drawJetBridges(ctx, sim, s, view, animT);
     for (const f of air) drawAircraft(ctx, f, s, { alt: f.alt, selected: f === selectedFlight, moving: true, time, shadow });
 
     // Real aircraft from the live feed: translucent, with a dashed outline and their callsign.
@@ -233,11 +239,11 @@ export class MapRenderer {
     ctx.restore();
   }
 
-  #drawJetBridges(ctx, sim, s, view) {
+  #drawJetBridges(ctx, sim, s, view, animT) {
     if (s < 0.25) return;
     for (const b of sim.jetBridgeSprites()) {
       if (!inView({ x: b.rotunda[0], y: b.rotunda[1] }, view, 70)) continue;
-      drawJetBridge(ctx, b, s, sim.t);
+      drawJetBridge(ctx, b, s, animT);
     }
   }
 

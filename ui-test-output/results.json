@@ -1,0 +1,590 @@
+{
+  "results": [
+    {
+      "name": "game boots without a menu when ?scenario is given",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "key \"f\" opens its panel",
+      "ok": true,
+      "detail": "got: Flights\nF\n×\nFlight board\nAirlines\nNo grouping\nBy group\nBy al"
+    },
+    {
+      "name": "key \"t\" opens its panel",
+      "ok": true,
+      "detail": "got: Terminals\nT\n×\nTerminal\nLayout code\nStaff\nUpgrade every termi"
+    },
+    {
+      "name": "key \"p\" opens its panel",
+      "ok": true,
+      "detail": "got: Projects\nP\n×\nCash available\n₹49.99 cr\nRapid-exit taxiways\n\nA"
+    },
+    {
+      "name": "key \"o\" opens its panel",
+      "ok": true,
+      "detail": "got: Operations\nO\n×\nWeather\nDaylight and lighting\nObjectives\nToda"
+    },
+    {
+      "name": "key \"l\" opens its panel",
+      "ok": true,
+      "detail": "got: Alerts\nL\n×\n07:00\nA normal day: Run Chennai through an ordina"
+    },
+    {
+      "name": "Esc closes the panel",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "key 1 sets Normal speed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "key 2 sets 4× speed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "key 3 sets 10× speed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "key 4 sets 20× speed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "key 5 sets 60× speed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Space pauses",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "quick add: +2 security lanes costs ₹70 lakh",
+      "ok": true,
+      "detail": "Δ 7000000"
+    },
+    {
+      "name": "construction is queued",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "panel shows it under construction",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "plan mode stages without spending",
+      "ok": true,
+      "detail": "{\"n\":2,\"money\":492943224.1222153}"
+    },
+    {
+      "name": "plan shows total and Build all",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Build all orders everything at once",
+      "ok": true,
+      "detail": "{\"n\":0,\"builds\":3,\"money\":465343224.1222153}"
+    },
+    {
+      "name": "staffing dial",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "shift template",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "hire 10 security staff",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "bulk upgrade orders every terminal",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "layout code is produced",
+      "ok": true,
+      "detail": "RC1.eyJjIjp7"
+    },
+    {
+      "name": "stamping a layout onto T4 orders builds",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "builds complete after time passes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "upgraded technology applies",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "clicking Terminal 1 on the map opens the Terminals panel",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "board row selects the flight",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "flight details come in order: status, route, timeline, stand, passengers, then live data, aircraft, conditions",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the timeline lists the steps of the flight, done steps first",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "live data shows four instruments, ground speed and the altimeter setting",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the flight card shows a registration and the route distance",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a folded section stays open while the card refreshes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "and stays closed after closing it",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the flight actions stay in view while the card scrolls",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "panels fit their width (nothing clipped sideways)",
+      "ok": true,
+      "detail": "468 in 468 · Flights · "
+    },
+    {
+      "name": "the top bar stays on one row at desktop width",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "prioritise charges ₹50,000",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "flight card shows the airline badge, group and name",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Airlines view lists groups with badges",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Airlines can be grouped by alliance",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "clicking an airline filters the flight board",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "flight board can be grouped by airline group",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "weather chip in the top bar",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Operations panel shows the weather card with a 12-hour forecast",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a thunderstorm stops outdoor ramp work",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the weather card explains the lightning rule",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "weather can be set to calm",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "apron floodlights can be forced on",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "runway light intensity can be set",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the ramp reopens after the storm",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "both runways are listed in the top bar by default",
+      "ok": true,
+      "detail": "RWY"
+    },
+    {
+      "name": "Operations has a plan selector and a card per runway",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "07/25 offers no \"not in use\" role",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "plan \"single\" takes 12/30 out of use",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the top bar then lists one runway",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "plan \"dual mixed\" uses both for everything",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a role button sets that runway",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the direction button turns 12/30 round",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "12/30 can be closed for inspection on its own",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "and reopened",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "clicking 12/30 on the map opens its own card",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "clicking the cash opens Finance",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Finance shows today, cash flow, income and expense breakdowns",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "panels have a title bar with a close button",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "airport charges can be set",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the books export as CSV",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "long panels get section links",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a section link scrolls the panel",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "the title bar closes the panel",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "H opens keys and tips",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Esc closes the help",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "project starts and charges",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "project completes with its effect (+6 fuel dispensers)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Terminal 5 needs Terminal 3 first",
+      "ok": true,
+      "detail": "Needs Terminal 3 (phase 2) first"
+    },
+    {
+      "name": "Terminal 3 opens with capacity",
+      "ok": true,
+      "detail": "{\"open\":true,\"bridges\":3,\"contact\":17,\"pos\":10}"
+    },
+    {
+      "name": "Terminal 3 adds new jet-bridge stands",
+      "ok": true,
+      "detail": "14 → 17 contact, 3 new bridges"
+    },
+    {
+      "name": "day report appears when the sim day ends",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "day report lists results by airline group",
+      "ok": true,
+      "detail": "{\"airlines\":true,\"rows\":25,\"day\":25,\"text\":\"Day 2 report 2026-11-03\\n\\nAn excellent day. A normal day: 212 departures, nothing diverted or cancelled.\\n\\nOn time\\n96 %\\naverage delay 1 min\\nProfit\\n₹1.81 cr\\n₹3.15 cr in, ₹1.34 cr out\\nSatisfaction\\n92\\nPassengers\\n64,583\\n0 missed their flight\\nADOPT ONE POLICY\\nRamp efficiency drills\\nTurnaround tasks 8 % faster\\nFast-track lane\\nSecurity throughput +10 %\\nPreventive maintenance\\nGround equipment breakdowns hal\"}"
+    },
+    {
+      "name": "adopting a policy applies it and closes the report",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "export downloads a save file",
+      "ok": true,
+      "detail": "runway-city-normal-day3.json"
+    },
+    {
+      "name": "Continue card appears after a reload",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "continue restores time, money, policies and projects",
+      "ok": true,
+      "detail": "{\"saved\":{\"t\":204778.5309999995,\"money\":731800578.0004704,\"perks\":1},\"loaded\":{\"t\":204778.5309999995,\"money\":731800578.0004704,\"perks\":1,\"t3\":\"done\"}}"
+    },
+    {
+      "name": "import restores a save file",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Live Watch shows tracked aircraft",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "adsb.fi credit is shown while live traffic is on",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Live Watch switches off",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "real weather sets the wind",
+      "ok": true,
+      "detail": "{\"src\":\"VOMM METAR METAR VOMM 012100Z 30007KT 2000 -RA SCT016 FEW025CB BKN080 25/24 Q1009 NOSIG\",\"wind\":{\"from\":295,\"kt\":8,\"gust\":null},\"on\":true}"
+    },
+    {
+      "name": "runway follows the wind option",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "ATC voice toggle works without errors",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "scenario \"festival\" runs",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "scenario \"bhogi\" runs",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "scenario \"cyclone\" runs",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "scenario \"outage\" runs",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "scenario \"sandbox\" runs",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "scenario \"career\" runs",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "every control in \"board\" has an accessible name",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "every control in \"term\" has an accessible name",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "every control in \"proj\" has an accessible name",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "every control in \"ops\" has an accessible name",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "every control in \"log\" has an accessible name",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "service worker is active",
+      "ok": true,
+      "detail": "activated"
+    },
+    {
+      "name": "web app manifest is linked",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "game loads offline",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "a new game starts at 06:00, whatever the real time",
+      "ok": true,
+      "detail": "{\"t\":21602.8056,\"normal\":true,\"clock\":\"06:00:00\"}"
+    },
+    {
+      "name": "a new game runs at Normal speed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "at 2× the clock runs 2 seconds per real second",
+      "ok": true,
+      "detail": "measured 1.99"
+    },
+    {
+      "name": "at 4× the clock runs 4 seconds per real second",
+      "ok": true,
+      "detail": "measured 3.98"
+    },
+    {
+      "name": "at 10× the clock runs 10 seconds per real second",
+      "ok": true,
+      "detail": "measured 10.01"
+    },
+    {
+      "name": "at 20× the clock runs 20 seconds per real second",
+      "ok": true,
+      "detail": "measured 19.94"
+    },
+    {
+      "name": "at 60× the clock runs 60 seconds per real second",
+      "ok": true,
+      "detail": "measured 60.14"
+    },
+    {
+      "name": "phone: no horizontal scrolling",
+      "ok": true,
+      "detail": "412 vs 412"
+    },
+    {
+      "name": "phone: panel is a bottom sheet inside the screen",
+      "ok": true,
+      "detail": "{\"top\":336.90625,\"bottom\":831,\"left\":6,\"right\":406,\"vw\":412,\"vh\":915}"
+    },
+    {
+      "name": "phone: touch targets are at least 34 px",
+      "ok": true,
+      "detail": "0 small: "
+    },
+    {
+      "name": "phone: one-finger drag pans the map",
+      "ok": true,
+      "detail": "{\"cam0\":{\"x\":-390.6500000000001,\"y\":-43.950000000000045,\"s\":0.07879758019250359},\"cam1\":{\"x\":-2198.2722214733462,\"y\":-1008.015184785785,\"s\":0.07879758019250359}}"
+    },
+    {
+      "name": "phone: pinch zooms in",
+      "ok": true,
+      "detail": "0.079 → 0.205"
+    }
+  ],
+  "errors": []
+}

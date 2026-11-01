@@ -1,5 +1,10 @@
 // Expansion projects: the real airport's pending works as career goals. Costs and build times are
 // scaled for gameplay (a real terminal takes years). Effects are read through World getters.
+import { serviceTime } from './timing.js';
+
+// `hours` are planning hours; on the game clock a project takes projectHours() of them.
+export const projectHours = (P) => Number(serviceTime(P.hours).toFixed(1));
+
 export const PROJECTS = {
   rets: {
     name: 'Rapid-exit taxiways',

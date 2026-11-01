@@ -4,7 +4,7 @@ export const SCENARIOS = {
   normal: {
     name: 'A normal day',
     brief: 'Run Chennai through an ordinary day. Keep departures on time and nobody diverted.',
-    traffic: 0.85,
+    traffic: 1,
     wind: { from: 190, kt: 6 },
     money: 50e7,
     events: [],
@@ -13,7 +13,7 @@ export const SCENARIOS = {
   festival: {
     name: 'Deepavali rush',
     brief: 'Festival travel: about 25 % more flights than a normal day. Stands and ground crews will run short.',
-    traffic: 1.05,
+    traffic: 1.25,
     wind: { from: 200, kt: 8 },
     money: 50e7,
     events: [{ at: 30, type: 'notice', text: 'Festival peak: airlines have added extra sections today.' }],
@@ -22,7 +22,7 @@ export const SCENARIOS = {
   bhogi: {
     name: 'Bhogi smoke',
     brief: 'January dawn: bonfire smoke cuts visibility. Chennai has only CAT-I landing aids, so runway capacity halves for two hours. 118 flights were affected in 2018.',
-    traffic: 0.8,
+    traffic: 1,
     wind: { from: 30, kt: 4 },
     money: 50e7,
     weather: { month: 0, forced: [{ type: 'smoke', at: 0, minutes: 150 }] },
@@ -34,7 +34,7 @@ export const SCENARIOS = {
   cyclone: {
     name: 'Cyclone day',
     brief: 'A cyclone crosses the coast (as Michaung did in Dec 2023: about 70 cancellations, 33 diversions). Crosswinds will close the runway. Protect what you can.',
-    traffic: 0.8,
+    traffic: 1,
     wind: { from: 60, kt: 18 },
     money: 50e7,
     weather: { month: 11, forced: [{ type: 'heavy', at: 10, minutes: 70 }, { type: 'storm', at: 80, minutes: 45 }, { type: 'rain', at: 125, minutes: 120 }] },
@@ -49,7 +49,7 @@ export const SCENARIOS = {
   outage: {
     name: 'Check-in system outage',
     brief: 'A global IT outage (as on 19 July 2024) forces manual boarding passes. Boarding takes twice as long for two hours.',
-    traffic: 0.85,
+    traffic: 1,
     wind: { from: 190, kt: 6 },
     money: 50e7,
     events: [{ at: 10, type: 'itOutage', minutes: 120, factor: 2, text: 'IT outage: manual check-in and boarding. Boarding times doubled.' }],
@@ -58,7 +58,7 @@ export const SCENARIOS = {
   monsoon: {
     name: 'North-east monsoon',
     brief: 'A November day: in the afternoon, rain and thunderstorms roll in off the Bay of Bengal. Lightning stops ramp work, rain slows taxiing and widens landing spacing, and the light fades early.',
-    traffic: 0.85,
+    traffic: 1,
     wind: { from: 40, kt: 10 },
     money: 50e7,
     weather: { month: 10, bias: { rain: 2.2, heavy: 2, storm: 1.4, drizzle: 1.5, clear: 0.2, fair: 0.4 }, forced: [{ type: 'cloudy', at: 480, minutes: 40 }, { type: 'rain', at: 520, minutes: 80 }, { type: 'storm', at: 600, minutes: 35 }] },
@@ -68,7 +68,7 @@ export const SCENARIOS = {
   night: {
     name: 'Night shift',
     brief: 'The test comes after dark, from about 18:00: floodlights, runway and taxiway lighting, headlights. Lighting faults are likelier at night; keep the apron and the runway lit.',
-    traffic: 0.8,
+    traffic: 1,
     wind: { from: 250, kt: 5 },
     money: 50e7,
     events: [],
@@ -77,7 +77,7 @@ export const SCENARIOS = {
   career: {
     name: 'Career: finish Terminal 3',
     brief: 'October 2026: Terminal 3 is still a building site and the runway tops out at 36 movements an hour. Over a few days, complete Terminal 3 and the rapid-exit taxiways without letting service slip.',
-    traffic: 0.9,
+    traffic: 1,
     wind: { from: 190, kt: 6 },
     money: 40e7,
     events: [],
@@ -86,7 +86,7 @@ export const SCENARIOS = {
   sandbox: {
     name: 'Sandbox',
     brief: 'Unlimited money and no objectives. Experiment with stands, fleets and runway use.',
-    traffic: 0.7,
+    traffic: 1,
     wind: { from: 190, kt: 6 },
     money: Infinity,
     events: [],

@@ -131,7 +131,7 @@ export class Atmosphere {
 
   // ---- ground weather: under the aircraft and vehicles ------------------------------------------------------
   // ctx has the identity transform; the static map has just been drawn.
-  ground(ctx, camera, sim, dpr) {
+  ground(ctx, camera, sim, dpr, animT) {
     const w = sim.weather?.now;
     const L = sim.lights;
     if (!w || !L) return;
@@ -149,7 +149,7 @@ export class Atmosphere {
       const px = 2600 * s * dpr; // one tile is 2.6 km wide
       const k = px / 128;
       const toward = ((sim.wind.from + 180) * Math.PI) / 180;
-      const drift = sim.t * 2.4; // metres of drift per second, quicker than the real wind so it can be seen
+      const drift = animT * 2.4; // metres of drift per second, quicker than the real wind so it can be seen
       const ox = Math.sin(toward) * drift;
       const oy = -Math.cos(toward) * drift;
       const pat = ctx.createPattern(this.#cloudTile(w.cloud), 'repeat');

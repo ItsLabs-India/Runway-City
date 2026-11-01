@@ -14,7 +14,7 @@ import { buildJetBridges, bridgeExtension, doorAt } from './jetbridges.js';
 import { crewSprites } from './groundcrew.js';
 import { sunAt, daylight, dayPhase } from './sky.js';
 import { Terminals, PERKS } from './terminal.js';
-import { PROJECTS, freshProjects } from './projects.js';
+import { PROJECTS, freshProjects, projectHours } from './projects.js';
 import { serviceTime, simDay, gameStart } from './timing.js';
 
 const KT = 0.5144;
@@ -27,7 +27,7 @@ export const RUNWAY_PLANS = {
   single: { label: 'Single runway', main: 'both', second: 'off', text: '07/25 does everything; 12/30 is a taxiway' },
   dualLand: { label: 'Dual landing', main: 'both', second: 'arr', text: 'Both runways land; take-offs on 07/25' },
   segregated: { label: 'Segregated', main: 'dep', second: 'arr', text: 'Narrow-bodies land on 12/30, take-offs on 07/25' },
-  dualMixed: { label: 'Dual mixed', main: 'both', second: 'both', text: 'Both runways land and take off: most capacity, most taxiway crossings' },
+  dualMixed: { label: 'Dual mixed', main: 'both', second: 'both', text: 'Both runways land and take off: most capacity, shortest taxiway queues' },
 };
 const SECOND_RUNWAY_PENALTY_S = 30; // an arrival takes 12/30 only when that lands it this much sooner (the taxi in is longer)
 const ARRIVAL_BALANCE_S = 25;
@@ -47,22 +47,22 @@ const MAX_HOLDING_S = 40 * 60;
 const SEP = { MM: 90, MH: 90, HM: 135, HH: 105, ML: 120, HL: 180, LL: 75, LM: 75, LH: 75 };
 const DEP_SEP = { L: 60, M: 60, H: 120 };
 
-export const DEFAULT_TRAFFIC_BOOST = 0.5; // "Traffic" option on a normal day: +50 % by default, up to +100 %
+export const DEFAULT_TRAFFIC_BOOST = 0; // "Traffic" option on a normal day: the real flights by default, or +50 %
 export const TRAFFIC_LEVELS = [0, 0.5]; // +100 % (1) works in the schedule but can still freeze the runway at line-up: not offered yet
 
 export const GSE = {
-  tug: { label: 'Baggage tugs + carts', price: 18e5, start: 8 },
-  beltLoader: { label: 'Belt loaders', price: 35e5, start: 9 },
-  fuel: { label: 'Fuel trucks', price: 90e5, start: 5 },
-  catering: { label: 'Catering trucks', price: 60e5, start: 5 },
-  van: { label: 'Cleaning vans', price: 12e5, start: 5 },
-  water: { label: 'Water / waste trucks', price: 30e5, start: 3 },
-  gpu: { label: 'Ground power units', price: 20e5, start: 9 },
-  stairs: { label: 'Passenger stairs', price: 25e5, start: 10 },
-  bus: { label: 'Apron buses', price: 120e5, start: 5 },
-  pushback: { label: 'Push-back tugs', price: 150e5, start: 4 },
+  tug: { label: 'Baggage tugs + carts', price: 18e5, start: 10 },
+  beltLoader: { label: 'Belt loaders', price: 35e5, start: 11 },
+  fuel: { label: 'Fuel trucks', price: 90e5, start: 6 },
+  catering: { label: 'Catering trucks', price: 60e5, start: 6 },
+  van: { label: 'Cleaning vans', price: 12e5, start: 6 },
+  water: { label: 'Water / waste trucks', price: 30e5, start: 4 },
+  gpu: { label: 'Ground power units', price: 20e5, start: 11 },
+  stairs: { label: 'Passenger stairs', price: 25e5, start: 12 },
+  bus: { label: 'Apron buses', price: 120e5, start: 6 },
+  pushback: { label: 'Push-back tugs', price: 150e5, start: 5 },
 };
-export const CREW = { label: 'Ramp crews (6 people)', hireCost: 3e5, dayCost: 6000, start: 10 };
+export const CREW = { label: 'Ramp crews (6 people)', hireCost: 3e5, dayCost: 6000, start: 12 };
 const VEHICLE_DAY_COST = 1500;
 const FIXED_OPEX_PER_DAY = 1.2e7; // terminal operations, utilities, maintenance, security support
 const UDF = { dom: 410, intl: 625 };
@@ -179,8 +179,8 @@ export class World {
     this.dayWx = freshDayWx();
     this.ledger = new Ledger();
     this.tariff = 'standard';
-    this.runwayPlan = 'dualLand';
-    this.second.mode = RUNWAY_PLANS.dualLand.second;
+    this.runwayPlan = 'dualMixed'; // the least waiting on the taxiways in every scenario measured
+    this.second.mode = RUNWAY_PLANS.dualMixed.second;
     for (const R of this.runways) {
       R.active = this.#bestRunway(R);
       this.#setupRunway(R);
@@ -659,7 +659,7 @@ export class World {
     this.#placeOnRunwayLine(f, f.s);
     // A closed runway is known well out; occupancy is decided just before the threshold, by
     // when the previous arrival is normally turning off (as with a real landing clearance).
-    if (dist < f.vApp * 30 && this.#rwClosed(R)) {
+    if (dist < f.vApp * 30 && this.#rwClosed(R, f.slot)) { // closed when it lands: a slot just after a closure is fine
       this.#goAround(f, 'Runway closed');
       return;
     }
@@ -1708,8 +1708,9 @@ export class World {
   }
 
   // People on the apron (ramp teams, marshallers, wing walkers, fuellers ...), for drawing.
-  staffSprites() {
-    return crewSprites(this);
+  // walkT: the clock people walk by (the display's, when drawing at speed).
+  staffSprites(walkT = this.t) {
+    return crewSprites(this, walkT);
   }
 
   // State of the jet bridges serving a flight, for the flight card.
@@ -2147,7 +2148,7 @@ export class World {
     const crossersWaiting = this.#nextArrivalTime(R) - this.t > 60 && this.flights.some((x) => x.crossWait === R.ref && (x.crossWaitSince ?? this.t) < R.lastDeparture.t);
     if (this.#rwClosed(R)) f.waiting = 'Runway closed';
     else if (R.user !== null) f.waiting = 'Runway occupied';
-    else if (this.t - R.lastDeparture.t < sep) f.waiting = 'Wake separation';
+    else if (this.t + this.#lineUpTime(f) - R.lastDeparture.t < sep) f.waiting = 'Wake separation'; // counted to the start of the take-off roll
     else if (this.#nextArrivalTime(R) - this.t < gap) f.waiting = 'Arrival on short final';
     else if (crossersWaiting) f.waiting = 'Letting traffic cross the runway';
     else if (this.#usesCrossing(R, 'dep') && this.#crossingBusy(R, gap)) f.waiting = 'Traffic on the crossing runway';
@@ -2166,9 +2167,13 @@ export class World {
   // Seconds this departure needs before the next arrival: line up, take off and be airborne (when the
   // runway is free again), plus the arrival's decision point and a margin.
   #departureGap(f) {
-    const lineUp = Math.max(0, (f.lineEnd ?? f.s) - f.s) / LINE_UP_SPEED;
     const roll = f.vRot / (f.wake === 'H' ? 1.7 : 2.1);
-    return lineUp + roll + RUNWAY_FREE_ALT_M / 9 + 8 + 10;
+    return this.#lineUpTime(f) + roll + RUNWAY_FREE_ALT_M / 9 + 8 + 10;
+  }
+
+  // Seconds from the hold-short line to lined up on the centreline.
+  #lineUpTime(f) {
+    return Math.max(0, (f.lineEnd ?? f.s) - f.s) / LINE_UP_SPEED;
   }
 
   #takeoff(f, dt) {
@@ -2805,9 +2810,9 @@ export class World {
     if (missing) return { ok: false, message: `Needs ${PROJECTS[missing].name} first` };
     if (this.money < P.cost) return { ok: false, message: 'Not enough money' };
     this.#spend(P.cost, 'projects', { label: `Project started: ${P.name}` });
-    Object.assign(st, { state: 'building', startedAt: this.t, finishAt: this.t + P.hours * 3600 });
-    this.note('info', `${P.name} started: ready in ${P.hours} hours.`);
-    return { ok: true, message: `${P.name} started (${P.hours} h)` };
+    Object.assign(st, { state: 'building', startedAt: this.t, finishAt: this.t + projectHours(P) * 3600 });
+    this.note('info', `${P.name} started: ready in ${projectHours(P)} hours.`);
+    return { ok: true, message: `${P.name} started (${projectHours(P)} h)` };
   }
 
   #projectsTick() {

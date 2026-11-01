@@ -401,7 +401,7 @@ h2.fh { display: flex; align-items: center; gap: 8px; }
 .wx-head { display: flex; align-items: center; gap: 10px; margin: 2px 0 8px; }
 .wx-head > div:nth-child(2) { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .wx-head small { color: var(--muted); font-size: 11px; }
-.wx-ico { font-size: 30px; line-height: 1; }
+.wx-ico { font-size: 30px; line-height: 1.25; }
 .wx-grid { grid-template-columns: repeat(2, 1fr); }
 .metar { margin: 6px 0; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; font: 11px/1.3 ui-monospace, Consolas, monospace; color: var(--muted); word-break: break-word; }
 .forecast { display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; margin: 6px 0; }
@@ -880,6 +880,16 @@ details.fd-sec[open] > summary { margin-bottom: 8px; }
 .cards.more { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 .cards.more .card span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .ctl .proc-a { margin: 0; }
+
+/* Airlines tab: one row per airline, three lines tall. Needs the #hud selector to win over the 30 px button rule. */
+.algroup { margin: 0 0 16px; }
+.algroup h4 { margin: 14px 0 4px; padding-bottom: 4px; border-bottom: 1px solid var(--line); color: var(--t1); font-size: 13px; font-weight: 650; }
+.algroup h4 small { color: var(--t3); font-size: 11px; font-weight: 400; }
+#hud button.alrow { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 1px 10px; width: 100%; height: auto; min-height: 0; padding: 8px 6px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; text-align: left; white-space: normal; font-weight: 400; }
+#hud button.alrow:hover:not(:disabled) { background: var(--s2); }
+.alname b { color: var(--t1); font-size: 13px; font-weight: 600; }
+.alname small, .alstat small { color: var(--t3); }
+.alstat { color: var(--t2); }
 #hud button.card.continue { flex-direction: row; align-items: center; justify-content: space-between; margin: 0 0 8px; padding: 14px 16px; border-color: transparent; background: var(--accent); }
 #hud button.card.continue:hover { background: #ffd35e; }
 .card.continue strong { color: var(--on-accent); font-size: 16px; }
@@ -957,3 +967,12 @@ details.fd-sec[open] > summary { margin-bottom: 8px; }
 @media (max-width: 760px) {
   #hud button.x { min-width: 44px; min-height: 44px; }
 }
+
+/* ---- flight board: the city and status columns take what the others leave, so the board always fits its panel ---- */
+.fids:not(.ftable) td:nth-child(3), .fids .st { max-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.fids:not(.ftable) th:nth-child(3), .fids:not(.ftable) td:nth-child(3) { width: 24%; }
+.fids:not(.ftable) th:last-child, .fids .st { width: 30%; }
+
+/* ---- flight card: when the turnaround will be done ---- */
+.fd-ready { margin: 8px 0 0; color: var(--t2); font-size: 12.5px; }
+.fd-ready b { color: var(--t1); font-variant-numeric: tabular-nums; }
